@@ -6,6 +6,22 @@
 // Prevent default mobile browser drag/overscroll gestures
 document.addEventListener('touchmove', (e) => { e.preventDefault(); }, { passive: false });
 
+/* --- START BUTTON & MODAL INITIALIZATION (AT TOP FOR INSTANT RESPONSE) --- */
+document.addEventListener('DOMContentLoaded', initModal);
+// Also run immediately in case DOM is already parsed
+initModal();
+
+function initModal() {
+    const btn = document.getElementById('btn-accept');
+    const modal = document.getElementById('warning-modal');
+    if (btn && modal) {
+        btn.onclick = () => {
+            initAudio();
+            modal.style.display = 'none';
+        };
+    }
+}
+
 /* --- 1. PROCEDURAL SOUND SYNTHESIZER (WEB AUDIO API) --- */
 const AudioCtx = window.AudioContext || window.webkitAudioContext;
 let audioCtx = null;
@@ -48,12 +64,11 @@ function playOrbitalChargeSound() {
     try {
         const now = audioCtx.currentTime;
         
-        // Deep sub-bass hum
         const subOsc = audioCtx.createOscillator();
         const subGain = audioCtx.createGain();
         subOsc.type = 'sine';
         subOsc.frequency.setValueAtTime(50, now);
-        subOsc.frequency.linearRampToValueAtTime(180, now + 3.2);
+        subOsc.linearRampToValueAtTime(180, now + 3.2);
         subGain.gain.setValueAtTime(0.1, now);
         subGain.gain.linearRampToValueAtTime(0.6, now + 3.0);
         subGain.gain.exponentialRampToValueAtTime(0.01, now + 3.5);
@@ -62,7 +77,6 @@ function playOrbitalChargeSound() {
         subOsc.start(now);
         subOsc.stop(now + 3.5);
 
-        // High frequency magnetic resonance charge
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
         osc.type = 'sawtooth';
@@ -125,7 +139,7 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-container.appendChild(renderer.domElement);
+if (container) container.appendChild(renderer.domElement);
 
 // Lighting
 const ambientLight = new THREE.AmbientLight(0x64748b, 1.0);
@@ -144,8 +158,10 @@ sunLight.shadow.camera.top = 110;
 sunLight.shadow.camera.bottom = -110;
 scene.add(sunLight);
 
-// Initialize the Orbital Cannon Space Sector from orbitalCannon.js
-OrbitalCannonModule.init(scene);
+// Safe Initialization of Orbital Cannon Module
+if (typeof OrbitalCannonModule !== 'undefined') {
+    OrbitalCannonModule.init(scene);
+}
 
 /* --- 3. GAME DATA & STATE --- */
 let isFPV = false;
@@ -204,7 +220,6 @@ function createBuildingTexture() {
 
 const bldgTexture = createBuildingTexture();
 
-// Asphalt Base
 const groundGeo = new THREE.PlaneGeometry(240, 240);
 const groundMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.9 });
 const ground = new THREE.Mesh(groundGeo, groundMat);
@@ -214,7 +229,7 @@ scene.add(ground);
 
 const cityGridSize = 6;
 const blockSpacing = 22;
-const halfSize = (cityGridSize * blockSpacing) / 2; // 66
+const halfSize = (cityGridSize * blockSpacing) / 2;
 
 // Elevated Concrete Sidewalks
 const sidewalkMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.8 });
@@ -315,7 +330,8 @@ for (let gx = 0; gx < cityGridSize; gx++) {
     }
 }
 activeBuildings = buildings.length;
-document.getElementById('hud-buildings').innerText = activeBuildings;
+const hudBldgs = document.getElementById('hud-buildings');
+if (hudBldgs) hudBldgs.innerText = activeBuildings;
 
 /* --- 7. DESTRUCTIBLE SIDEWALK STALLS & SHELTERS --- */
 function createStreetShelter(x, z, angle = 0) {
@@ -511,7 +527,8 @@ for (let i = 0; i < 45; i++) {
     });
 }
 aliveCivilians = npcs.length;
-document.getElementById('hud-civilians').innerText = aliveCivilians;
+const hudCivs = document.getElementById('hud-civilians');
+if (hudCivs) hudCivs.innerText = aliveCivilians;
 
 /* --- 10. EXPLOSION & STRUCTURAL DESTRUCTION --- */
 function triggerExplosion(x, y, z, radius = 14, damage = 100) {
@@ -525,7 +542,6 @@ function triggerExplosion(x, y, z, radius = 14, damage = 100) {
     scene.add(blastMesh);
     particles.push({ mesh: blastMesh, scaleSpeed: 26, fadeSpeed: 3.2, maxScale: radius * 1.5 });
 
-    // Structural Building Floor Physics
     buildings.forEach(b => {
         let anyFloorDestroyed = false;
 
@@ -593,7 +609,6 @@ function triggerExplosion(x, y, z, radius = 14, damage = 100) {
         }
     });
 
-    // Shatter Sidewalk Stalls
     shelters.forEach(sh => {
         if (!sh.alive) return;
         const dist = Math.hypot(sh.x - x, sh.z - z);
@@ -618,7 +633,6 @@ function triggerExplosion(x, y, z, radius = 14, damage = 100) {
         }
     });
 
-    // Destroy Cars
     cars.forEach(car => {
         if (!car.alive) return;
         const dist = Math.hypot(car.x - x, car.z - z);
@@ -640,7 +654,6 @@ function triggerExplosion(x, y, z, radius = 14, damage = 100) {
         }
     });
 
-    // Trigger NPC Panic & Shelter Fleeing
     npcs.forEach(npc => {
         if (!npc.alive) return;
         const dist = Math.hypot(npc.x - x, npc.z - z);
@@ -679,12 +692,15 @@ function triggerExplosion(x, y, z, radius = 14, damage = 100) {
 }
 
 function updateHUD() {
-    document.getElementById('hud-civilians').innerText = aliveCivilians;
-    document.getElementById('hud-buildings').innerText = activeBuildings;
-    document.getElementById('hud-collateral').innerText = `$${collateralDamageMillions}M`;
+    const cEl = document.getElementById('hud-civilians');
+    const bEl = document.getElementById('hud-buildings');
+    const clEl = document.getElementById('hud-collateral');
+    if (cEl) cEl.innerText = aliveCivilians;
+    if (bEl) bEl.innerText = activeBuildings;
+    if (clEl) clEl.innerText = `$${collateralDamageMillions}M`;
 }
 
-/* --- 11. WEAPON LAUNCHERS & ORBITAL CUTSCENE TRIGGER --- */
+/* --- 11. WEAPON LAUNCHERS & ORBITAL CUTSCENE --- */
 function launchArsenalStrike(targetPos) {
     initAudio();
 
@@ -725,30 +741,30 @@ function launchArsenalStrike(targetPos) {
         }
     } 
     else if (selectedWeapon === 'LASER') {
-        // Trigger space sequence via orbitalCannon.js
         playOrbitalChargeSound();
         inCutscene = true;
         cutsceneTimer = 0;
         if (document.pointerLockElement) document.exitPointerLock?.();
 
-        OrbitalCannonModule.triggerCutscene(targetPos, camera, scene, {
-            onImpact: (beamMesh) => {
-                // Synchronized ground explosion & sound
-                playLaserSound();
-                triggerExplosion(targetPos.x, 0, targetPos.z, 28, 280);
+        if (typeof OrbitalCannonModule !== 'undefined') {
+            OrbitalCannonModule.triggerCutscene(targetPos, camera, scene, {
+                onImpact: (beamMesh) => {
+                    playLaserSound();
+                    triggerExplosion(targetPos.x, 0, targetPos.z, 28, 280);
 
-                particles.push({
-                    mesh: beamMesh,
-                    scaleSpeed: 2,
-                    fadeSpeed: 1.6,
-                    maxScale: 1.5
-                });
-            },
-            onComplete: () => {
-                inCutscene = false;
-                if (isFPV && !('ontouchstart' in window)) document.body.requestPointerLock();
-            }
-        });
+                    particles.push({
+                        mesh: beamMesh,
+                        scaleSpeed: 2,
+                        fadeSpeed: 1.6,
+                        maxScale: 1.5
+                    });
+                },
+                onComplete: () => {
+                    inCutscene = false;
+                    if (isFPV && !('ontouchstart' in window)) document.body.requestPointerLock();
+                }
+            });
+        }
     }
 }
 
@@ -869,9 +885,13 @@ document.querySelectorAll('.weap-btn').forEach(btn => {
 function toggleCameraMode() {
     if (inCutscene) return;
     isFPV = !isFPV;
-    document.getElementById('hud-cam-mode').innerText = isFPV ? 'FIRST PERSON' : 'COMMANDER';
-    document.getElementById('btn-toggle-cam').innerText = isFPV ? 'SWITCH TO DRONE [TAB]' : 'SWITCH TO FPV [TAB]';
-    document.getElementById('reticle').style.display = isFPV ? 'block' : 'none';
+    const modeEl = document.getElementById('hud-cam-mode');
+    const toggleEl = document.getElementById('btn-toggle-cam');
+    const reticleEl = document.getElementById('reticle');
+    
+    if (modeEl) modeEl.innerText = isFPV ? 'FIRST PERSON' : 'COMMANDER';
+    if (toggleEl) toggleEl.innerText = isFPV ? 'SWITCH TO DRONE [TAB]' : 'SWITCH TO FPV [TAB]';
+    if (reticleEl) reticleEl.style.display = isFPV ? 'block' : 'none';
 
     if (isFPV && !('ontouchstart' in window)) {
         document.body.requestPointerLock();
@@ -879,7 +899,9 @@ function toggleCameraMode() {
         document.exitPointerLock?.();
     }
 }
-document.getElementById('btn-toggle-cam').addEventListener('click', toggleCameraMode);
+
+const camBtn = document.getElementById('btn-toggle-cam');
+if (camBtn) camBtn.addEventListener('click', toggleCameraMode);
 
 /* --- 14. MOBILE TOUCH CONTROLS --- */
 const joystick = { active: false, startX: 0, startY: 0, moveX: 0, moveY: 0 };
@@ -890,14 +912,15 @@ let lastTouchX = 0;
 let lastTouchY = 0;
 
 if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
-    document.getElementById('mobile-controls').style.display = 'flex';
+    const mobControls = document.getElementById('mobile-controls');
+    if (mobControls) mobControls.style.display = 'flex';
 
     window.addEventListener('touchstart', (e) => {
         if (inCutscene) return;
         for (let i = 0; i < e.changedTouches.length; i++) {
             const touch = e.changedTouches[i];
             
-            if (touch.clientX < window.innerWidth / 2 && !joystick.active) {
+            if (touch.clientX < window.innerWidth / 2 && !joystick.active && joystickZone) {
                 const rect = joystickZone.getBoundingClientRect();
                 joystick.active = true;
                 joystick.startX = rect.left + rect.width / 2;
@@ -921,7 +944,7 @@ if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
         for (let i = 0; i < e.changedTouches.length; i++) {
             const touch = e.changedTouches[i];
 
-            if (joystick.active && touch.clientX < window.innerWidth / 2) {
+            if (joystick.active && touch.clientX < window.innerWidth / 2 && joystickKnob) {
                 const dx = touch.clientX - joystick.startX;
                 const dy = touch.clientY - joystick.startY;
                 const dist = Math.min(45, Math.hypot(dx, dy));
@@ -951,7 +974,7 @@ if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
                 joystick.active = false;
                 joystick.moveX = 0;
                 joystick.moveY = 0;
-                joystickKnob.style.transform = 'translate(0px, 0px)';
+                if (joystickKnob) joystickKnob.style.transform = 'translate(0px, 0px)';
             }
             if (touch.identifier === touchLookId) {
                 touchLookId = null;
@@ -962,19 +985,16 @@ if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
     window.addEventListener('touchend', handleTouchEnd);
     window.addEventListener('touchcancel', handleTouchEnd);
 
-    document.getElementById('btn-mobile-fire').addEventListener('touchstart', (e) => {
-        e.stopPropagation();
-        if (!inCutscene) launchArsenalStrike(targetAimPoint);
-    });
+    const mobFire = document.getElementById('btn-mobile-fire');
+    if (mobFire) {
+        mobFire.addEventListener('touchstart', (e) => {
+            e.stopPropagation();
+            if (!inCutscene) launchArsenalStrike(targetAimPoint);
+        });
+    }
 }
 
-/* --- 15. DISCLAIMER START BUTTON --- */
-document.getElementById('btn-accept').addEventListener('click', () => {
-    initAudio();
-    document.getElementById('warning-modal').style.display = 'none';
-});
-
-/* --- 16. MAIN SIMULATION LOOP --- */
+/* --- 15. MAIN SIMULATION LOOP --- */
 const clock = new THREE.Clock();
 
 function animate() {
@@ -987,10 +1007,10 @@ function animate() {
         cutsceneTimer += delta;
     }
 
-    // Update Orbital Space Animation via orbitalCannon.js
-    OrbitalCannonModule.update(delta, inCutscene, cutsceneTimer, camera);
+    if (typeof OrbitalCannonModule !== 'undefined') {
+        OrbitalCannonModule.update(delta, inCutscene, cutsceneTimer, camera);
+    }
 
-    // Update Missiles
     for (let i = missiles.length - 1; i >= 0; i--) {
         const m = missiles[i];
         const dir = new THREE.Vector3().subVectors(m.target, m.mesh.position);
@@ -1005,7 +1025,6 @@ function animate() {
         }
     }
 
-    // Update Blast Particles
     for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
         p.mesh.scale.addScalar(p.scaleSpeed * delta);
@@ -1016,7 +1035,6 @@ function animate() {
         }
     }
 
-    // Update Structural Physics Debris Blocks
     for (let i = physicsBlocks.length - 1; i >= 0; i--) {
         const d = physicsBlocks[i];
         d.vy -= 26 * delta;
@@ -1043,7 +1061,6 @@ function animate() {
         }
     }
 
-    // Update Civilian Cars
     cars.forEach(car => {
         if (!car.alive) return;
 
@@ -1082,7 +1099,6 @@ function animate() {
         car.group.position.set(car.x, 0, car.z);
     });
 
-    // Update Smart NPCs
     npcs.forEach(npc => {
         if (!npc.alive) return;
 
@@ -1134,7 +1150,6 @@ function animate() {
             let nextX = npc.x + Math.sin(npc.angle) * npc.speed * delta;
             let nextZ = npc.z + Math.cos(npc.angle) * npc.speed * delta;
 
-            // Strict Building Bounding Box Resolution
             buildings.forEach(b => {
                 if (!b.alive) return;
                 const halfW = b.width / 2 + 0.6;
@@ -1172,7 +1187,6 @@ function animate() {
         }
     });
 
-    // Camera Navigation & FPV Logic (Active when not in Space Cutscene)
     if (!inCutscene) {
         if (isFPV) {
             if (keys['ArrowLeft']) player.yaw += 2.0 * delta;
@@ -1216,4 +1230,32 @@ function animate() {
                 targetGroup.position.set(targetAimPoint.x, 0.1, targetAimPoint.z);
             }
         } else {
-            if (keys['KeyW'] || keys['ArrowUp']) commanderCam.targetZ -=
+            if (keys['KeyW'] || keys['ArrowUp']) commanderCam.targetZ -= 40 * delta;
+            if (keys['KeyS'] || keys['ArrowDown']) commanderCam.targetZ += 40 * delta;
+            if (keys['KeyA'] || keys['ArrowLeft']) commanderCam.targetX -= 40 * delta;
+            if (keys['KeyD'] || keys['ArrowRight']) commanderCam.targetX += 40 * delta;
+
+            if (joystick.active) {
+                commanderCam.targetX += joystick.moveX * 40 * delta;
+                commanderCam.targetZ += joystick.moveY * 40 * delta;
+            }
+
+            commanderCam.x += (commanderCam.targetX - commanderCam.x) * 0.1;
+            commanderCam.z += (commanderCam.targetZ + 72 - commanderCam.z) * 0.1;
+
+            camera.position.set(commanderCam.x, commanderCam.y, commanderCam.z);
+            camera.lookAt(commanderCam.x, 0, commanderCam.z - 72);
+        }
+    }
+
+    renderer.render(scene, camera);
+}
+
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// Launch loop
+animate();
