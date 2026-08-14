@@ -1,7 +1,6 @@
 /* =========================================================================
    ORBITAL CANNON & SPACE CUTSCENE MODULE (orbitalCannon.js)
-   Handles the 3D Satellite Platform, Space Environment, Shooting Stars,
-   and the 2-Phase Cinematic Cutscene (Space Charge -> Ground Impact -> Return).
+   Frame-driven 2-phase cutscene with zero-hang guarantees.
    ========================================================================= */
 
 const OrbitalCannonModule = (() => {
@@ -9,18 +8,22 @@ const OrbitalCannonModule = (() => {
     const spaceGroup = new THREE.Group();
     spaceGroup.position.copy(spaceOrigin);
 
-    let satCore, satCoreGlow, satRing1, satRing2, satRing3, satBarrel;
-    let satChargeLight;
+    let satCore, satCoreGlow, satRing1, satRing2, satRing3, satBarrel, satChargeLight;
     const shootingStars = [];
     const chargingParticles = [];
 
-    // Cutscene Phase State: 'IDLE' | 'SPACE_CHARGE' | 'GROUND_IMPACT'
-    let cutscenePhase = 'IDLE';
+    // Frame-driven cutscene state
+    let isCutsceneActive = false;
+    let cutsceneTime = 0;
+    let targetGroundPos = new THREE.Vector3();
+    let currentBeamMesh = null;
+    let cutsceneCallbacks = null;
+    let impactFired = false;
 
     function init(scene) {
         scene.add(spaceGroup);
 
-        // 1. High-Intensity Space Lighting
+        // 1. Bright Space Lighting
         const spaceLight = new THREE.DirectionalLight(0xffffff, 3.0);
         spaceLight.position.set(spaceOrigin.x + 90, spaceOrigin.y + 70, spaceOrigin.z + 100);
         scene.add(spaceLight);
@@ -32,19 +35,18 @@ const OrbitalCannonModule = (() => {
         const spaceAmbient = new THREE.AmbientLight(0x334155, 1.8);
         spaceGroup.add(spaceAmbient);
 
-        // Dynamic core charge point light
         satChargeLight = new THREE.PointLight(0x38bdf8, 0, 80);
         satChargeLight.position.set(0, -8.5, 0);
         spaceGroup.add(satChargeLight);
 
-        // 2. Earth Horizon Glow
+        // 2. Earth Horizon
         const earthHorizonGeo = new THREE.SphereGeometry(220, 32, 16, 0, Math.PI * 2, 0, Math.PI * 0.45);
         const earthHorizonMat = new THREE.MeshBasicMaterial({ color: 0x0284c7, side: THREE.BackSide, transparent: true, opacity: 0.9 });
         const earthHorizon = new THREE.Mesh(earthHorizonGeo, earthHorizonMat);
         earthHorizon.position.set(0, -240, 0);
         spaceGroup.add(earthHorizon);
 
-        // 3. Dense Starfield
+        // 3. Starfield
         const starGeo = new THREE.BufferGeometry();
         const starCount = 700;
         const starPos = new Float32Array(starCount * 3);
@@ -57,7 +59,7 @@ const OrbitalCannonModule = (() => {
         const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 1.8 }));
         spaceGroup.add(stars);
 
-        // 4. Smooth Shooting Stars
+        // 4. Shooting Stars
         for (let i = 0; i < 5; i++) {
             const streakGeo = new THREE.CylinderGeometry(0.08, 0.4, 18, 6);
             streakGeo.rotateZ(Math.PI / 3);
@@ -73,7 +75,7 @@ const OrbitalCannonModule = (() => {
             });
         }
 
-        // 5. Converging In-Flow Charging Particle Swarm
+        // 5. In-Flow Charging Particle Swarm
         for (let i = 0; i < 40; i++) {
             const pMesh = new THREE.Mesh(
                 new THREE.SphereGeometry(0.25, 8, 8),
@@ -88,7 +90,7 @@ const OrbitalCannonModule = (() => {
             });
         }
 
-        // 6. Massive Heavy Superstructure Chassis
+        // 6. Massive Heavy Superstructure
         const satHub = new THREE.Mesh(
             new THREE.CylinderGeometry(5.0, 6.5, 14.0, 16),
             new THREE.MeshStandardMaterial({ color: 0x64748b, metalness: 0.9, roughness: 0.2 })
@@ -124,7 +126,6 @@ const OrbitalCannonModule = (() => {
         satRing3.rotation.x = Math.PI / 2;
         spaceGroup.add(satRing3);
 
-        // Magnetic Barrel
         satBarrel = new THREE.Mesh(
             new THREE.CylinderGeometry(2.2, 3.5, 6.0, 16),
             new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.95, roughness: 0.1 })
@@ -132,7 +133,6 @@ const OrbitalCannonModule = (() => {
         satBarrel.position.y = -8.5;
         spaceGroup.add(satBarrel);
 
-        // Massive Radiant Plasma Core Orb
         satCore = new THREE.Mesh(
             new THREE.SphereGeometry(3.2, 32, 32),
             new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.0 })
@@ -148,8 +148,21 @@ const OrbitalCannonModule = (() => {
         spaceGroup.add(satCoreGlow);
     }
 
-    function update(delta, inCutscene, cutsceneTimer, camera) {
-        // 1. Animate Shooting Stars
+    function triggerCutscene(targetPos, camera, scene, callbacks) {
+        targetGroundPos.copy(targetPos);
+        cutsceneCallbacks = callbacks;
+        isCutsceneActive = true;
+        cutsceneTime = 0;
+        impactFired = false;
+
+        satCore.material.opacity = 0.3;
+        satCoreGlow.material.opacity = 0.2;
+        satCore.scale.set(0.1, 0.1, 0.1);
+        satCoreGlow.scale.set(0.1, 0.1, 0.1);
+    }
+
+    function update(delta, inCutscene, cutsceneTimer, camera, scene) {
+        // 1. Animate Background Shooting Stars
         shootingStars.forEach(star => {
             star.timer -= delta;
             if (star.timer <= 0 && !star.active) {
@@ -169,49 +182,85 @@ const OrbitalCannonModule = (() => {
             }
         });
 
-        // 2. Animate Satellite & Camera based on Phase
-        if (cutscenePhase === 'SPACE_CHARGE') {
-            satRing1.rotation.z += 6.0 * delta;
-            satRing2.rotation.z -= 8.5 * delta;
-            satRing3.rotation.z += 12.0 * delta;
+        // 2. Automated Frame-Driven Cutscene Pipeline
+        if (isCutsceneActive) {
+            cutsceneTime += delta;
 
-            const progress = Math.min(1.0, cutsceneTimer / 3.2);
-            satCore.material.opacity = 0.4 + progress * 0.6;
-            satCoreGlow.material.opacity = 0.2 + progress * 0.5;
-            satCore.scale.setScalar(0.2 + progress * 1.3);
-            satCoreGlow.scale.setScalar(0.2 + progress * 1.5 + Math.sin(Date.now() * 0.03) * 0.1);
+            // Phase 1: Space Orbit & Charging (0.0s to 3.1s)
+            if (cutsceneTime < 3.1) {
+                satRing1.rotation.z += 6.0 * delta;
+                satRing2.rotation.z -= 8.5 * delta;
+                satRing3.rotation.z += 12.0 * delta;
 
-            satChargeLight.intensity = progress * 6.0;
+                const progress = Math.min(1.0, cutsceneTime / 3.0);
+                satCore.material.opacity = 0.4 + progress * 0.6;
+                satCoreGlow.material.opacity = 0.2 + progress * 0.5;
+                satCore.scale.setScalar(0.2 + progress * 1.3);
+                satCoreGlow.scale.setScalar(0.2 + progress * 1.5 + Math.sin(Date.now() * 0.03) * 0.1);
+                satChargeLight.intensity = progress * 6.0;
 
-            chargingParticles.forEach(p => {
-                p.mesh.material.opacity = 0.9;
-                p.dist -= p.speed * delta;
-                if (p.dist <= 0.8) p.dist = 14 + Math.random() * 8;
-                p.angle += 3.0 * delta;
-                p.mesh.position.set(
-                    Math.cos(p.angle) * p.dist,
-                    -8.5 + (Math.random() - 0.5) * 2.0,
-                    Math.sin(p.angle) * p.dist
+                chargingParticles.forEach(p => {
+                    p.mesh.material.opacity = 0.9;
+                    p.dist -= p.speed * delta;
+                    if (p.dist <= 0.8) p.dist = 14 + Math.random() * 8;
+                    p.angle += 3.0 * delta;
+                    p.mesh.position.set(
+                        Math.cos(p.angle) * p.dist,
+                        -8.5 + (Math.random() - 0.5) * 2.0,
+                        Math.sin(p.angle) * p.dist
+                    );
+                });
+
+                // Orbit Camera
+                const camOrbitRadius = 42.0;
+                const camAngle = cutsceneTime * 0.65;
+                camera.position.set(
+                    spaceOrigin.x + Math.sin(camAngle) * camOrbitRadius,
+                    spaceOrigin.y + 10.0 + Math.sin(cutsceneTime * 0.8) * 3.5,
+                    spaceOrigin.z + Math.cos(camAngle) * camOrbitRadius
                 );
-            });
+                camera.lookAt(spaceOrigin.x, spaceOrigin.y - 3.0, spaceOrigin.z);
 
-            // Space Orbit Camera
-            const camOrbitRadius = 42.0;
-            const camAngle = cutsceneTimer * 0.65;
-            camera.position.set(
-                spaceOrigin.x + Math.sin(camAngle) * camOrbitRadius,
-                spaceOrigin.y + 10.0 + Math.sin(cutsceneTimer * 0.8) * 3.5,
-                spaceOrigin.z + Math.cos(camAngle) * camOrbitRadius
-            );
-            camera.lookAt(spaceOrigin.x, spaceOrigin.y - 3.0, spaceOrigin.z);
+            } 
+            // Phase 2: Ground Impact & Beam Strike (3.1s to 4.3s)
+            else if (cutsceneTime < 4.3) {
+                // One-time impact explosion trigger
+                if (!impactFired) {
+                    impactFired = true;
 
-        } else if (cutscenePhase === 'GROUND_IMPACT') {
-            // Ground Impact Phase: Let ground camera view play out undisturbed!
-            satCore.material.opacity = 0.0;
-            satCoreGlow.material.opacity = 0.0;
-            satChargeLight.intensity = 0;
-            chargingParticles.forEach(p => p.mesh.material.opacity = 0.0);
+                    // Ground Beam
+                    currentBeamMesh = new THREE.Mesh(
+                        new THREE.CylinderGeometry(1.6, 1.6, 450, 24),
+                        new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.95 })
+                    );
+                    currentBeamMesh.position.set(targetGroundPos.x, 225, targetGroundPos.z);
+                    scene.add(currentBeamMesh);
 
+                    if (cutsceneCallbacks && cutsceneCallbacks.onImpact) {
+                        cutsceneCallbacks.onImpact(currentBeamMesh);
+                    }
+                }
+
+                // Dynamic Ground Camera with Subtle Blast Shake
+                const shakeX = (Math.random() - 0.5) * 0.4;
+                const shakeY = (Math.random() - 0.5) * 0.4;
+                camera.position.set(targetGroundPos.x + 18 + shakeX, 30 + shakeY, targetGroundPos.z + 26);
+                camera.lookAt(targetGroundPos.x, 0, targetGroundPos.z);
+            } 
+            // Phase 3: Seamless Auto-Release (4.3s+) - NEVER GETS STUCK
+            else {
+                isCutsceneActive = false;
+                impactFired = false;
+
+                satCore.material.opacity = 0.0;
+                satCoreGlow.material.opacity = 0.0;
+                satChargeLight.intensity = 0;
+                chargingParticles.forEach(p => p.mesh.material.opacity = 0.0);
+
+                if (cutsceneCallbacks && cutsceneCallbacks.onComplete) {
+                    cutsceneCallbacks.onComplete();
+                }
+            }
         } else {
             // Idle ambient rotation
             satRing1.rotation.z += 0.8 * delta;
@@ -223,45 +272,6 @@ const OrbitalCannonModule = (() => {
             satChargeLight.intensity = 0;
             chargingParticles.forEach(p => p.mesh.material.opacity = 0.0);
         }
-    }
-
-    function triggerCutscene(targetPos, camera, scene, callbacks) {
-        cutscenePhase = 'SPACE_CHARGE';
-        satCore.material.opacity = 0.3;
-        satCoreGlow.material.opacity = 0.2;
-        satCore.scale.set(0.1, 0.1, 0.1);
-        satCoreGlow.scale.set(0.1, 0.1, 0.1);
-
-        // Phase 1: 3.4 seconds of charging in space
-        setTimeout(() => {
-            cutscenePhase = 'GROUND_IMPACT';
-
-            // Cut Camera down to the city ground strike target
-            camera.position.set(targetPos.x + 18, 30, targetPos.z + 26);
-            camera.lookAt(targetPos.x, 0, targetPos.z);
-
-            // Kinetic Ground Beam
-            const beamMesh = new THREE.Mesh(
-                new THREE.CylinderGeometry(1.6, 1.6, 450, 24),
-                new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.95 })
-            );
-            beamMesh.position.set(targetPos.x, 225, targetPos.z);
-            scene.add(beamMesh);
-
-            // Trigger ground explosion & sound
-            if (callbacks.onImpact) {
-                callbacks.onImpact(beamMesh);
-            }
-
-            // Phase 2: After 1.4s of ground impact, conclude and return control
-            setTimeout(() => {
-                cutscenePhase = 'IDLE';
-                if (callbacks.onComplete) {
-                    callbacks.onComplete();
-                }
-            }, 1400);
-
-        }, 3400);
     }
 
     return {
