@@ -1,7 +1,12 @@
-// Prevent default browser gestures (pull-to-refresh / elastic bounce)
+/* =========================================================================
+   CITY COMMANDER: MAIN GAME LOGIC (game.js)
+   Integrates with orbitalCannon.js, Three.js, and the DOM HUD.
+   ========================================================================= */
+
+// Prevent default mobile browser drag/overscroll gestures
 document.addEventListener('touchmove', (e) => { e.preventDefault(); }, { passive: false });
 
-/* --- 1. WEB AUDIO PROCEDURAL SOUND SYNTHESIZER --- */
+/* --- 1. PROCEDURAL SOUND SYNTHESIZER (WEB AUDIO API) --- */
 const AudioCtx = window.AudioContext || window.webkitAudioContext;
 let audioCtx = null;
 
@@ -109,7 +114,7 @@ function playLaunchSound() {
     } catch(e) {}
 }
 
-/* --- 2. THREE.JS ENGINE INITIALIZATION --- */
+/* --- 2. THREE.JS ENGINE SETUP --- */
 const container = document.getElementById('canvas-container');
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x080e18);
@@ -122,7 +127,7 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 container.appendChild(renderer.domElement);
 
-// City Lighting
+// Lighting
 const ambientLight = new THREE.AmbientLight(0x64748b, 1.0);
 scene.add(ambientLight);
 
@@ -139,7 +144,10 @@ sunLight.shadow.camera.top = 110;
 sunLight.shadow.camera.bottom = -110;
 scene.add(sunLight);
 
-/* --- 3. GAME DATA & GLOBAL STATE --- */
+// Initialize the Orbital Cannon Space Sector from orbitalCannon.js
+OrbitalCannonModule.init(scene);
+
+/* --- 3. GAME DATA & STATE --- */
 let isFPV = false;
 let selectedWeapon = 'CRUISE';
 let collateralDamageMillions = 0;
@@ -156,7 +164,7 @@ const missiles = [];
 const particles = [];
 const physicsBlocks = [];
 
-// FPV Camera Walker
+// FPV Camera Player
 const player = {
     x: 0,
     z: 40,
@@ -174,7 +182,7 @@ const commanderCam = {
     targetZ: 0
 };
 
-/* --- 4. ENVIRONMENT, ROADS & SIDEWALKS --- */
+/* --- 4. ENVIRONMENT: ASPHALT ROADS & CONCRETE SIDEWALKS --- */
 function createBuildingTexture() {
     const canvas = document.createElement('canvas');
     canvas.width = 128;
@@ -196,7 +204,7 @@ function createBuildingTexture() {
 
 const bldgTexture = createBuildingTexture();
 
-// Asphalt Ground Base
+// Asphalt Base
 const groundGeo = new THREE.PlaneGeometry(240, 240);
 const groundMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.9 });
 const ground = new THREE.Mesh(groundGeo, groundMat);
@@ -208,7 +216,7 @@ const cityGridSize = 6;
 const blockSpacing = 22;
 const halfSize = (cityGridSize * blockSpacing) / 2; // 66
 
-// Elevated Concrete Sidewalk Blocks
+// Elevated Concrete Sidewalks
 const sidewalkMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.8 });
 for (let gx = 0; gx < cityGridSize; gx++) {
     for (let gz = 0; gz < cityGridSize; gz++) {
@@ -257,7 +265,7 @@ targetGroup.add(beaconBeam);
 targetGroup.position.set(0, 0.1, 0);
 scene.add(targetGroup);
 
-/* --- 6. STRUCTURAL PHYSICS BUILDINGS --- */
+/* --- 6. STRUCTURAL BUILDINGS --- */
 for (let gx = 0; gx < cityGridSize; gx++) {
     for (let gz = 0; gz < cityGridSize; gz++) {
         const posX = (gx * blockSpacing) - halfSize + blockSpacing / 2;
@@ -433,95 +441,7 @@ roadAvenues.forEach((avenuePos) => {
     });
 });
 
-/* --- 9. MASSIVE CINEMATIC ORBITAL SPACE DEFENSE CANNON --- */
-const spaceOrigin = new THREE.Vector3(0, 800, 0);
-const spaceGroup = new THREE.Group();
-spaceGroup.position.copy(spaceOrigin);
-scene.add(spaceGroup);
-
-// Bright Space Lighting
-const spaceLight = new THREE.DirectionalLight(0xdbeafe, 2.2);
-spaceLight.position.set(spaceOrigin.x + 80, spaceOrigin.y + 60, spaceOrigin.z + 90);
-scene.add(spaceLight);
-
-const earthRimLight = new THREE.DirectionalLight(0x0284c7, 1.8);
-earthRimLight.position.set(spaceOrigin.x - 60, spaceOrigin.y - 40, spaceOrigin.z - 70);
-scene.add(earthRimLight);
-
-// Curved Blue Earth Atmosphere Horizon in Space
-const earthHorizonGeo = new THREE.SphereGeometry(180, 32, 16, 0, Math.PI * 2, 0, Math.PI * 0.4);
-const earthHorizonMat = new THREE.MeshBasicMaterial({ color: 0x0369a1, wireframe: false, side: THREE.BackSide });
-const earthHorizon = new THREE.Mesh(earthHorizonGeo, earthHorizonMat);
-earthHorizon.position.set(0, -220, 0);
-spaceGroup.add(earthHorizon);
-
-// Bright Starfield
-const starGeo = new THREE.BufferGeometry();
-const starCount = 500;
-const starPos = new Float32Array(starCount * 3);
-for (let i = 0; i < starCount * 3; i += 3) {
-    starPos[i] = (Math.random() - 0.5) * 350;
-    starPos[i + 1] = (Math.random() - 0.5) * 350;
-    starPos[i + 2] = (Math.random() - 0.5) * 350;
-}
-starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
-const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 1.4 }));
-spaceGroup.add(stars);
-
-// Massive Heavy Superstructure Chassis
-const satHub = new THREE.Mesh(
-    new THREE.CylinderGeometry(5.0, 6.5, 14.0, 16),
-    new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.9, roughness: 0.2 })
-);
-spaceGroup.add(satHub);
-
-// Titanium Truss Core
-const truss = new THREE.Mesh(
-    new THREE.BoxGeometry(4.0, 22.0, 4.0),
-    new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.8 })
-);
-spaceGroup.add(truss);
-
-// Giant Extended Solar Arrays (Reflective Cyan/Gold Panels)
-const solarWingGeo = new THREE.BoxGeometry(28.0, 0.2, 7.0);
-const solarWingMat = new THREE.MeshStandardMaterial({ color: 0x0284c7, metalness: 0.95, roughness: 0.1 });
-const wing1 = new THREE.Mesh(solarWingGeo, solarWingMat); wing1.position.set(20.0, 2.0, 0);
-const wing2 = new THREE.Mesh(solarWingGeo, solarWingMat); wing2.position.set(-20.0, 2.0, 0);
-spaceGroup.add(wing1, wing2);
-
-// 3 Concentric Counter-Rotating Kinetic Induction Rings
-const ringMatOuter = new THREE.MeshStandardMaterial({ color: 0x38bdf8, metalness: 0.9, roughness: 0.2, emissive: 0x0284c7, emissiveIntensity: 0.4 });
-const ringMatInner = new THREE.MeshStandardMaterial({ color: 0x67e8f9, metalness: 0.9, roughness: 0.2, emissive: 0x38bdf8, emissiveIntensity: 0.6 });
-
-const satRing1 = new THREE.Mesh(new THREE.TorusGeometry(9.0, 0.5, 12, 36), ringMatOuter);
-satRing1.rotation.x = Math.PI / 2;
-spaceGroup.add(satRing1);
-
-const satRing2 = new THREE.Mesh(new THREE.TorusGeometry(6.8, 0.4, 12, 36), ringMatInner);
-satRing2.rotation.x = Math.PI / 2;
-spaceGroup.add(satRing2);
-
-const satRing3 = new THREE.Mesh(new THREE.TorusGeometry(4.8, 0.35, 12, 36), ringMatOuter);
-satRing3.rotation.x = Math.PI / 2;
-spaceGroup.add(satRing3);
-
-// Heavy Magnetic Kinetic Emitter Barrel Nozzle
-const satBarrel = new THREE.Mesh(
-    new THREE.CylinderGeometry(2.2, 3.5, 6.0, 16),
-    new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.95, roughness: 0.1 })
-);
-satBarrel.position.y = -8.5;
-spaceGroup.add(satBarrel);
-
-// Blinding Plasma Core Orb
-const satCore = new THREE.Mesh(
-    new THREE.SphereGeometry(2.4, 24, 24),
-    new THREE.MeshBasicMaterial({ color: 0xe0f2fe, transparent: true, opacity: 0.0 })
-);
-satCore.position.y = -8.5;
-spaceGroup.add(satCore);
-
-/* --- 10. BLOCKY 3D SMART NPCS --- */
+/* --- 9. BLOCKY 3D SMART NPCS --- */
 const shirtColors = [0x38bdf8, 0xef4444, 0x10b981, 0xf59e0b, 0xa855f7];
 
 function createBlockyNPCMesh(shirtColor) {
@@ -593,7 +513,7 @@ for (let i = 0; i < 45; i++) {
 aliveCivilians = npcs.length;
 document.getElementById('hud-civilians').innerText = aliveCivilians;
 
-/* --- 11. EXPLOSION & STRUCTURAL DESTRUCTION --- */
+/* --- 10. EXPLOSION & STRUCTURAL DESTRUCTION --- */
 function triggerExplosion(x, y, z, radius = 14, damage = 100) {
     playExplosionSound(radius > 16 ? 1.6 : 1.1);
 
@@ -605,7 +525,7 @@ function triggerExplosion(x, y, z, radius = 14, damage = 100) {
     scene.add(blastMesh);
     particles.push({ mesh: blastMesh, scaleSpeed: 26, fadeSpeed: 3.2, maxScale: radius * 1.5 });
 
-    // Structural Building Floor Physics Separation
+    // Structural Building Floor Physics
     buildings.forEach(b => {
         let anyFloorDestroyed = false;
 
@@ -720,7 +640,7 @@ function triggerExplosion(x, y, z, radius = 14, damage = 100) {
         }
     });
 
-    // Trigger NPC Panic & Shelter Seeking
+    // Trigger NPC Panic & Shelter Fleeing
     npcs.forEach(npc => {
         if (!npc.alive) return;
         const dist = Math.hypot(npc.x - x, npc.z - z);
@@ -764,7 +684,7 @@ function updateHUD() {
     document.getElementById('hud-collateral').innerText = `$${collateralDamageMillions}M`;
 }
 
-/* --- 12. ARSENAL LAUNCHER & CINEMATIC CUTSCENE --- */
+/* --- 11. WEAPON LAUNCHERS & ORBITAL CUTSCENE TRIGGER --- */
 function launchArsenalStrike(targetPos) {
     initAudio();
 
@@ -805,47 +725,30 @@ function launchArsenalStrike(targetPos) {
         }
     } 
     else if (selectedWeapon === 'LASER') {
-        // Dramatic Slow Cinematic Cutscene
+        // Trigger space sequence via orbitalCannon.js
         playOrbitalChargeSound();
         inCutscene = true;
         cutsceneTimer = 0;
         if (document.pointerLockElement) document.exitPointerLock?.();
 
-        satCore.material.opacity = 1.0;
-        satCore.scale.set(0.1, 0.1, 0.1);
+        OrbitalCannonModule.triggerCutscene(targetPos, camera, scene, {
+            onImpact: (beamMesh) => {
+                // Synchronized ground explosion & sound
+                playLaserSound();
+                triggerExplosion(targetPos.x, 0, targetPos.z, 28, 280);
 
-        // 3.2 Second Dramatic Orbital Charge-up sequence
-        setTimeout(() => {
-            playLaserSound();
-            
-            // Camera cuts to ground level right before impact
-            camera.position.set(targetPos.x + 18, 32, targetPos.z + 28);
-            camera.lookAt(targetPos.x, 0, targetPos.z);
-
-            // Supercharged Kinetic Beam
-            const beamMesh = new THREE.Mesh(
-                new THREE.CylinderGeometry(3.5, 3.5, 400, 32),
-                new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.95 })
-            );
-            beamMesh.position.set(targetPos.x, 200, targetPos.z);
-            scene.add(beamMesh);
-
-            triggerExplosion(targetPos.x, 0, targetPos.z, 28, 280);
-
-            particles.push({
-                mesh: beamMesh,
-                scaleSpeed: 2,
-                fadeSpeed: 1.6,
-                maxScale: 1.5
-            });
-
-            setTimeout(() => {
-                satCore.material.opacity = 0.0;
+                particles.push({
+                    mesh: beamMesh,
+                    scaleSpeed: 2,
+                    fadeSpeed: 1.6,
+                    maxScale: 1.5
+                });
+            },
+            onComplete: () => {
                 inCutscene = false;
                 if (isFPV && !('ontouchstart' in window)) document.body.requestPointerLock();
-            }, 1500);
-
-        }, 3200);
+            }
+        });
     }
 }
 
@@ -893,7 +796,7 @@ function createClusterDispenserModule() {
     return group;
 }
 
-/* --- 13. RAYCASTING & TARGET LOCKING --- */
+/* --- 12. RAYCASTING & AIMING --- */
 const raycaster = new THREE.Raycaster();
 const mousePos = new THREE.Vector2();
 let targetAimPoint = new THREE.Vector3(0, 0, 0);
@@ -937,7 +840,7 @@ window.addEventListener('click', (e) => {
     }
 });
 
-/* --- 14. KEYBOARD & UI CONTROLS --- */
+/* --- 13. KEYBOARD & UI CONTROLS --- */
 const keys = {};
 window.addEventListener('keydown', (e) => {
     if (inCutscene) return;
@@ -978,7 +881,7 @@ function toggleCameraMode() {
 }
 document.getElementById('btn-toggle-cam').addEventListener('click', toggleCameraMode);
 
-/* --- 15. MOBILE TOUCH CONTROLS --- */
+/* --- 14. MOBILE TOUCH CONTROLS --- */
 const joystick = { active: false, startX: 0, startY: 0, moveX: 0, moveY: 0 };
 const joystickZone = document.getElementById('joystick-container');
 const joystickKnob = document.getElementById('joystick-knob');
@@ -1065,13 +968,13 @@ if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
     });
 }
 
-/* --- 16. DISCLAIMER START BUTTON --- */
+/* --- 15. DISCLAIMER START BUTTON --- */
 document.getElementById('btn-accept').addEventListener('click', () => {
     initAudio();
     document.getElementById('warning-modal').style.display = 'none';
 });
 
-/* --- 17. MAIN ANIMATION & SIMULATION LOOP --- */
+/* --- 16. MAIN SIMULATION LOOP --- */
 const clock = new THREE.Clock();
 
 function animate() {
@@ -1080,33 +983,12 @@ function animate() {
 
     targetRing.scale.setScalar(1 + Math.sin(Date.now() * 0.008) * 0.12);
 
-    // Dynamic Cinematic Satellite Ring Rotations & Space Camera Orbit
     if (inCutscene) {
         cutsceneTimer += delta;
-
-        // Counter-rotating induction rings
-        satRing1.rotation.z += 4.5 * delta;
-        satRing2.rotation.z -= 6.0 * delta;
-        satRing3.rotation.z += 8.5 * delta;
-
-        // Growing plasma core
-        satCore.scale.addScalar(1.4 * delta);
-
-        // Smooth cinematic camera orbit around space satellite
-        const camOrbitRadius = 38.0;
-        const camAngle = cutsceneTimer * 0.75;
-        camera.position.set(
-            spaceOrigin.x + Math.sin(camAngle) * camOrbitRadius,
-            spaceOrigin.y + 10.0 + Math.sin(cutsceneTimer) * 4.0,
-            spaceOrigin.z + Math.cos(camAngle) * camOrbitRadius
-        );
-        camera.lookAt(spaceOrigin.x, spaceOrigin.y - 2.0, spaceOrigin.z);
-    } else {
-        // Idle orbital spin
-        satRing1.rotation.z += 0.8 * delta;
-        satRing2.rotation.z -= 1.2 * delta;
-        satRing3.rotation.z += 1.6 * delta;
     }
+
+    // Update Orbital Space Animation via orbitalCannon.js
+    OrbitalCannonModule.update(delta, inCutscene, cutsceneTimer, camera);
 
     // Update Missiles
     for (let i = missiles.length - 1; i >= 0; i--) {
@@ -1200,7 +1082,7 @@ function animate() {
         car.group.position.set(car.x, 0, car.z);
     });
 
-    // Update Smart NPCs (Flailing Panic & Building Hitbox Resolution)
+    // Update Smart NPCs
     npcs.forEach(npc => {
         if (!npc.alive) return;
 
@@ -1275,7 +1157,6 @@ function animate() {
         const swing = Math.sin(npc.animWalk) * 0.45;
 
         if (npc.state === 'PANIC') {
-            // Frantic arm waving overhead
             npc.leftArm.rotation.x = Math.PI - swing;
             npc.rightArm.rotation.x = Math.PI + swing;
         } else if (npc.state === 'HIDING') {
@@ -1291,7 +1172,7 @@ function animate() {
         }
     });
 
-    // Camera Navigation & FPV Logic (Active when not in Cutscene)
+    // Camera Navigation & FPV Logic (Active when not in Space Cutscene)
     if (!inCutscene) {
         if (isFPV) {
             if (keys['ArrowLeft']) player.yaw += 2.0 * delta;
@@ -1335,32 +1216,4 @@ function animate() {
                 targetGroup.position.set(targetAimPoint.x, 0.1, targetAimPoint.z);
             }
         } else {
-            if (keys['KeyW'] || keys['ArrowUp']) commanderCam.targetZ -= 40 * delta;
-            if (keys['KeyS'] || keys['ArrowDown']) commanderCam.targetZ += 40 * delta;
-            if (keys['KeyA'] || keys['ArrowLeft']) commanderCam.targetX -= 40 * delta;
-            if (keys['KeyD'] || keys['ArrowRight']) commanderCam.targetX += 40 * delta;
-
-            if (joystick.active) {
-                commanderCam.targetX += joystick.moveX * 40 * delta;
-                commanderCam.targetZ += joystick.moveY * 40 * delta;
-            }
-
-            commanderCam.x += (commanderCam.targetX - commanderCam.x) * 0.1;
-            commanderCam.z += (commanderCam.targetZ + 72 - commanderCam.z) * 0.1;
-
-            camera.position.set(commanderCam.x, commanderCam.y, commanderCam.z);
-            camera.lookAt(commanderCam.x, 0, commanderCam.z - 72);
-        }
-    }
-
-    renderer.render(scene, camera);
-}
-
-window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-});
-
-// Start game loop
-animate();
+            if (keys['KeyW'] || keys['ArrowUp']) commanderCam.targetZ -=
