@@ -63,50 +63,48 @@ function playOrbitalChargeSound() {
     if (!audioCtx) return;
     try {
         const now = audioCtx.currentTime;
-        
+
+        // Layer 1: High-energy turbine whine (audible on phones & laptops)
+        const osc1 = audioCtx.createOscillator();
+        const gain1 = audioCtx.createGain();
+        osc1.type = 'sawtooth';
+        osc1.frequency.setValueAtTime(220, now);
+        osc1.frequency.exponentialRampToValueAtTime(1900, now + 3.3);
+        gain1.gain.setValueAtTime(0.15, now);
+        gain1.gain.linearRampToValueAtTime(0.7, now + 3.0);
+        gain1.gain.linearRampToValueAtTime(0.01, now + 3.45);
+        osc1.connect(gain1);
+        gain1.connect(audioCtx.destination);
+        osc1.start(now);
+        osc1.stop(now + 3.45);
+
+        // Layer 2: Resonant frequency pulse sweep
+        const osc2 = audioCtx.createOscillator();
+        const gain2 = audioCtx.createGain();
+        osc2.type = 'triangle';
+        osc2.frequency.setValueAtTime(440, now);
+        osc2.frequency.exponentialRampToValueAtTime(3200, now + 3.3);
+        gain2.gain.setValueAtTime(0.1, now);
+        gain2.gain.linearRampToValueAtTime(0.5, now + 3.1);
+        gain2.gain.linearRampToValueAtTime(0.01, now + 3.45);
+        osc2.connect(gain2);
+        gain2.connect(audioCtx.destination);
+        osc2.start(now);
+        osc2.stop(now + 3.45);
+
+        // Layer 3: Deep low-end rumble
         const subOsc = audioCtx.createOscillator();
         const subGain = audioCtx.createGain();
         subOsc.type = 'sine';
-        subOsc.frequency.setValueAtTime(50, now);
-        subOsc.linearRampToValueAtTime(180, now + 3.2);
-        subGain.gain.setValueAtTime(0.1, now);
+        subOsc.frequency.setValueAtTime(80, now);
+        subOsc.frequency.linearRampToValueAtTime(240, now + 3.2);
+        subGain.gain.setValueAtTime(0.2, now);
         subGain.gain.linearRampToValueAtTime(0.6, now + 3.0);
-        subGain.gain.exponentialRampToValueAtTime(0.01, now + 3.5);
+        subGain.gain.linearRampToValueAtTime(0.01, now + 3.45);
         subOsc.connect(subGain);
         subGain.connect(audioCtx.destination);
         subOsc.start(now);
-        subOsc.stop(now + 3.5);
-
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(180, now);
-        osc.frequency.exponentialRampToValueAtTime(2200, now + 3.2);
-        gain.gain.setValueAtTime(0.05, now);
-        gain.gain.linearRampToValueAtTime(0.8, now + 3.0);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 3.5);
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.start(now);
-        osc.stop(now + 3.5);
-    } catch(e) {}
-}
-
-function playLaserSound() {
-    if (!audioCtx) return;
-    try {
-        const now = audioCtx.currentTime;
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(1400, now);
-        osc.frequency.exponentialRampToValueAtTime(60, now + 0.8);
-        gain.gain.setValueAtTime(1.0, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.8);
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.start(now);
-        osc.stop(now + 0.8);
+        subOsc.stop(now + 3.45);
     } catch(e) {}
 }
 
