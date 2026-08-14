@@ -3,12 +3,11 @@
    Integrates with orbitalCannon.js, Three.js, and the DOM HUD.
    ========================================================================= */
 
-// Prevent default mobile browser drag/overscroll gestures
+// Prevent default mobile browser gestures
 document.addEventListener('touchmove', (e) => { e.preventDefault(); }, { passive: false });
 
-/* --- START BUTTON & MODAL INITIALIZATION (AT TOP FOR INSTANT RESPONSE) --- */
+/* --- START BUTTON & MODAL INITIALIZATION --- */
 document.addEventListener('DOMContentLoaded', initModal);
-// Also run immediately in case DOM is already parsed
 initModal();
 
 function initModal() {
@@ -22,7 +21,7 @@ function initModal() {
     }
 }
 
-/* --- 1. PROCEDURAL SOUND SYNTHESIZER (WEB AUDIO API) --- */
+/* --- 1. PROCEDURAL SOUND SYNTHESIZER --- */
 const AudioCtx = window.AudioContext || window.webkitAudioContext;
 let audioCtx = null;
 
@@ -64,47 +63,49 @@ function playOrbitalChargeSound() {
     try {
         const now = audioCtx.currentTime;
 
-        // Layer 1: High-energy turbine whine (audible on phones & laptops)
         const osc1 = audioCtx.createOscillator();
         const gain1 = audioCtx.createGain();
         osc1.type = 'sawtooth';
         osc1.frequency.setValueAtTime(220, now);
-        osc1.frequency.exponentialRampToValueAtTime(1900, now + 3.3);
+        osc1.frequency.exponentialRampToValueAtTime(1900, now + 3.1);
         gain1.gain.setValueAtTime(0.15, now);
-        gain1.gain.linearRampToValueAtTime(0.7, now + 3.0);
-        gain1.gain.linearRampToValueAtTime(0.01, now + 3.45);
+        gain1.gain.linearRampToValueAtTime(0.7, now + 2.8);
+        gain1.gain.linearRampToValueAtTime(0.01, now + 3.2);
         osc1.connect(gain1);
         gain1.connect(audioCtx.destination);
         osc1.start(now);
-        osc1.stop(now + 3.45);
+        osc1.stop(now + 3.2);
 
-        // Layer 2: Resonant frequency pulse sweep
         const osc2 = audioCtx.createOscillator();
         const gain2 = audioCtx.createGain();
         osc2.type = 'triangle';
         osc2.frequency.setValueAtTime(440, now);
-        osc2.frequency.exponentialRampToValueAtTime(3200, now + 3.3);
+        osc2.frequency.exponentialRampToValueAtTime(3200, now + 3.1);
         gain2.gain.setValueAtTime(0.1, now);
-        gain2.gain.linearRampToValueAtTime(0.5, now + 3.1);
-        gain2.gain.linearRampToValueAtTime(0.01, now + 3.45);
+        gain2.gain.linearRampToValueAtTime(0.5, now + 2.9);
+        gain2.gain.linearRampToValueAtTime(0.01, now + 3.2);
         osc2.connect(gain2);
         gain2.connect(audioCtx.destination);
         osc2.start(now);
-        osc2.stop(now + 3.45);
+        osc2.stop(now + 3.2);
+    } catch(e) {}
+}
 
-        // Layer 3: Deep low-end rumble
-        const subOsc = audioCtx.createOscillator();
-        const subGain = audioCtx.createGain();
-        subOsc.type = 'sine';
-        subOsc.frequency.setValueAtTime(80, now);
-        subOsc.frequency.linearRampToValueAtTime(240, now + 3.2);
-        subGain.gain.setValueAtTime(0.2, now);
-        subGain.gain.linearRampToValueAtTime(0.6, now + 3.0);
-        subGain.gain.linearRampToValueAtTime(0.01, now + 3.45);
-        subOsc.connect(subGain);
-        subGain.connect(audioCtx.destination);
-        subOsc.start(now);
-        subOsc.stop(now + 3.45);
+function playLaserSound() {
+    if (!audioCtx) return;
+    try {
+        const now = audioCtx.currentTime;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(1400, now);
+        osc.frequency.exponentialRampToValueAtTime(60, now + 0.8);
+        gain.gain.setValueAtTime(1.0, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.8);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(now);
+        osc.stop(now + 0.8);
     } catch(e) {}
 }
 
@@ -156,19 +157,17 @@ sunLight.shadow.camera.top = 110;
 sunLight.shadow.camera.bottom = -110;
 scene.add(sunLight);
 
-// Safe Initialization of Orbital Cannon Module
 if (typeof OrbitalCannonModule !== 'undefined') {
     OrbitalCannonModule.init(scene);
 }
 
-/* --- 3. GAME DATA & STATE --- */
+/* --- 3. GAME STATE --- */
 let isFPV = false;
 let selectedWeapon = 'CRUISE';
 let collateralDamageMillions = 0;
 let aliveCivilians = 0;
 let activeBuildings = 0;
 let inCutscene = false;
-let cutsceneTimer = 0;
 
 const buildings = [];
 const npcs = [];
@@ -229,7 +228,6 @@ const cityGridSize = 6;
 const blockSpacing = 22;
 const halfSize = (cityGridSize * blockSpacing) / 2;
 
-// Elevated Concrete Sidewalks
 const sidewalkMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.8 });
 for (let gx = 0; gx < cityGridSize; gx++) {
     for (let gz = 0; gz < cityGridSize; gz++) {
@@ -243,7 +241,6 @@ for (let gx = 0; gx < cityGridSize; gx++) {
     }
 }
 
-// Road Divider Stripes
 const roadLineMat = new THREE.MeshBasicMaterial({ color: 0xfacc15 });
 const roadAvenues = [-44, -22, 0, 22, 44];
 
@@ -741,8 +738,6 @@ function launchArsenalStrike(targetPos) {
     else if (selectedWeapon === 'LASER') {
         playOrbitalChargeSound();
         inCutscene = true;
-        cutsceneTimer = 0;
-        if (document.pointerLockElement) document.exitPointerLock?.();
 
         if (typeof OrbitalCannonModule !== 'undefined') {
             OrbitalCannonModule.triggerCutscene(targetPos, camera, scene, {
@@ -759,7 +754,6 @@ function launchArsenalStrike(targetPos) {
                 },
                 onComplete: () => {
                     inCutscene = false;
-                    if (isFPV && !('ontouchstart' in window)) document.body.requestPointerLock();
                 }
             });
         }
@@ -831,11 +825,10 @@ function updateRaycastToPoint(screenX, screenY) {
 window.addEventListener('mousemove', (e) => {
     if (inCutscene) return;
     if (isFPV) {
-        if (document.pointerLockElement === document.body) {
-            player.yaw -= e.movementX * 0.0028;
-            player.pitch -= e.movementY * 0.0028;
-            player.pitch = Math.max(-Math.PI / 2.5, Math.min(Math.PI / 2.5, player.pitch));
-        }
+        // Smooth FPV looking without locking bug
+        player.yaw -= e.movementX * 0.0028;
+        player.pitch -= e.movementY * 0.0028;
+        player.pitch = Math.max(-Math.PI / 2.5, Math.min(Math.PI / 2.5, player.pitch));
     }
 });
 
@@ -845,9 +838,8 @@ window.addEventListener('click', (e) => {
     if (isFPV) {
         if (document.pointerLockElement !== document.body && !('ontouchstart' in window)) {
             document.body.requestPointerLock();
-        } else {
-            launchArsenalStrike(targetAimPoint);
         }
+        launchArsenalStrike(targetAimPoint);
     } else {
         updateRaycastToPoint(e.clientX, e.clientY);
         launchArsenalStrike(targetAimPoint);
@@ -1001,12 +993,8 @@ function animate() {
 
     targetRing.scale.setScalar(1 + Math.sin(Date.now() * 0.008) * 0.12);
 
-    if (inCutscene) {
-        cutsceneTimer += delta;
-    }
-
     if (typeof OrbitalCannonModule !== 'undefined') {
-        OrbitalCannonModule.update(delta, inCutscene, cutsceneTimer, camera);
+        OrbitalCannonModule.update(delta, inCutscene, 0, camera, scene);
     }
 
     for (let i = missiles.length - 1; i >= 0; i--) {
