@@ -1,12 +1,11 @@
 /* =========================================================================
-   DESTRUCTIBLE BUILDINGS & INTERIORS MODULE (buildings.js)
-   Features enterable buildings with doors, hollow rooms, stairs, windows, 
-   corner support pillars, and dynamic structural leaning/toppling physics.
+   DESTRUCTIBLE MODULAR BUILDINGS & INTERIORS (buildings.js)
+   Features 100% destructible pieces (walls, pillars, floors, stairs),
+   dynamic structural leaning/toppling physics, and smooth stair climbing.
    ========================================================================= */
 
 const BuildingsModule = (() => {
     const buildings = [];
-    const interiorObstacles = [];
     let bldgTexture = null;
 
     function createBuildingTexture() {
@@ -33,7 +32,7 @@ const BuildingsModule = (() => {
 
         const wallMat = new THREE.MeshStandardMaterial({ map: bldgTexture, roughness: 0.6, metalness: 0.2 });
         const floorMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.8 });
-        const pillarMat = new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.5 });
+        const pillarMat = new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.6 });
         const stairMat = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.7 });
 
         for (let gx = 0; gx < cityGridSize; gx++) {
@@ -42,7 +41,7 @@ const BuildingsModule = (() => {
                 const posZ = (gz * blockSpacing) - halfSize + blockSpacing / 2;
 
                 const floorCount = 3 + Math.floor(Math.random() * 4); // 3 to 6 floors
-                const floorHeight = 4.0;
+                const floorHeight = 4.2;
                 const width = 12.0;
                 const depth = 12.0;
 
@@ -59,114 +58,137 @@ const BuildingsModule = (() => {
                     alive: true,
                     totalHeight: floorCount * floorHeight,
                     floorCount: floorCount,
-                    // Leaning & structural physics
+                    // Dynamic leaning torque
                     leanX: 0,
                     leanZ: 0,
                     targetLeanX: 0,
                     targetLeanZ: 0,
-                    structuralIntegrity: 100,
+                    angularVelocityX: 0,
+                    angularVelocityZ: 0,
                     collapsed: false,
-                    floors: [],
-                    pillars: [],
+                    pieces: [],  // Every piece is fully destructible
                     stairs: []
                 };
 
-                // Build each floor with enterable interior
+                // Build each floor piece-by-piece
                 for (let f = 0; f < floorCount; f++) {
                     const floorY = f * floorHeight;
-                    const floorData = {
-                        index: f,
-                        y: floorY,
-                        health: 120,
-                        alive: true,
-                        parts: []
+
+                    // Helper to register destructible piece
+                    const addPiece = (mesh, health, isPillar = false, pillarCorner = '') => {
+                        buildingGroup.add(mesh);
+                        buildingObj.pieces.push({
+                            mesh: mesh,
+                            floor: f,
+                            health: health,
+                            maxHealth: health,
+                            alive: true,
+                            isPillar: isPillar,
+                            pillarCorner: pillarCorner, // 'NW','NE','SW','SE'
+                            localPos: mesh.position.clone()
+                        });
                     };
 
                     // 1. Floor Slab
-                    const slab = new THREE.Mesh(new THREE.BoxGeometry(width, 0.3, depth), floorMat);
-                    slab.position.set(0, floorY + 0.15, 0);
+                    const slab = new THREE.Mesh(new THREE.BoxGeometry(width, 0.35, depth), floorMat);
+                    slab.position.set(0, floorY + 0.175, 0);
                     slab.receiveShadow = true;
                     slab.castShadow = true;
-                    buildingGroup.add(slab);
-                    floorData.parts.push(slab);
+                    addPiece(slab, 90);
 
-                    // 2. Corner Support Pillars (Damage to pillars causes leaning!)
-                    const pillarOffsets = [
-                        { x: -5.4, z: -5.4, name: 'NW' },
-                        { x: 5.4, z: -5.4, name: 'NE' },
-                        { x: -5.4, z: 5.4, name: 'SW' },
-                        { x: 5.4, z: 5.4, name: 'SE' }
+                    // 2. Corner Pillars (Structural supports)
+                    const pillarPositions = [
+                        { x: -5.4, z: -5.4, corner: 'NW' },
+                        { x: 5.4, z: -5.4, corner: 'NE' },
+                        { x: -5.4, z: 5.4, corner: 'SW' },
+                        { x: 5.4, z: 5.4, corner: 'SE' }
                     ];
 
-                    pillarOffsets.forEach(po => {
-                        const pil = new THREE.Mesh(new THREE.BoxGeometry(0.8, floorHeight, 0.8), pillarMat);
-                        pil.position.set(po.x, floorY + floorHeight / 2, po.z);
+                    pillarPositions.forEach(p => {
+                        const pil = new THREE.Mesh(new THREE.BoxGeometry(0.9, floorHeight, 0.9), pillarMat);
+                        pil.position.set(p.x, floorY + floorHeight / 2, p.z);
                         pil.castShadow = true;
-                        buildingGroup.add(pil);
-                        floorData.parts.push(pil);
-
-                        buildingObj.pillars.push({
-                            mesh: pil,
-                            floor: f,
-                            xOffset: po.x,
-                            zOffset: po.z,
-                            worldX: posX + po.x,
-                            worldY: floorY + floorHeight / 2,
-                            worldZ: posZ + po.z,
-                            alive: true,
-                            health: 45
-                        });
+                        addPiece(pil, 60, true, p.corner);
                     });
 
-                    // 3. Walls with Doorway (Ground floor) & Windows (Upper floors)
+                    // 3. Walls with Doorway (Ground Floor) & Windows (Upper Floors)
                     if (f === 0) {
-                        // Front Wall with Doorway opening
-                        const wallL = new THREE.Mesh(new THREE.BoxGeometry(4.5, floorHeight, 0.4), wallMat);
-                        wallL.position.set(-3.75, floorY + floorHeight / 2, 5.8);
-                        const wallR = new THREE.Mesh(new THREE.BoxGeometry(4.5, floorHeight, 0.4), wallMat);
-                        wallR.position.set(3.75, floorY + floorHeight / 2, 5.8);
-                        const doorTop = new THREE.Mesh(new THREE.BoxGeometry(3.0, 1.2, 0.4), wallMat);
-                        doorTop.position.set(0, floorY + floorHeight - 0.6, 5.8);
-                        buildingGroup.add(wallL, wallR, doorTop);
-                        floorData.parts.push(wallL, wallR, doorTop);
+                        // Front Wall Left
+                        const wFL = new THREE.Mesh(new THREE.BoxGeometry(4.2, floorHeight, 0.45), wallMat);
+                        wFL.position.set(-3.9, floorY + floorHeight / 2, 5.78);
+                        addPiece(wFL, 50);
+
+                        // Front Wall Right
+                        const wFR = new THREE.Mesh(new THREE.BoxGeometry(4.2, floorHeight, 0.45), wallMat);
+                        wFR.position.set(3.9, floorY + floorHeight / 2, 5.78);
+                        addPiece(wFR, 50);
+
+                        // Door Header
+                        const doorTop = new THREE.Mesh(new THREE.BoxGeometry(3.6, 1.2, 0.45), wallMat);
+                        doorTop.position.set(0, floorY + floorHeight - 0.6, 5.78);
+                        addPiece(doorTop, 40);
                     } else {
-                        // Upper Front Wall with Window
-                        const wallFront = new THREE.Mesh(new THREE.BoxGeometry(width, floorHeight, 0.4), wallMat);
-                        wallFront.position.set(0, floorY + floorHeight / 2, 5.8);
-                        buildingGroup.add(wallFront);
-                        floorData.parts.push(wallFront);
+                        // Upper Front Wall with Window Cutout
+                        const wF1 = new THREE.Mesh(new THREE.BoxGeometry(4.5, floorHeight, 0.45), wallMat);
+                        wF1.position.set(-3.75, floorY + floorHeight / 2, 5.78);
+                        const wF2 = new THREE.Mesh(new THREE.BoxGeometry(4.5, floorHeight, 0.45), wallMat);
+                        wF2.position.set(3.75, floorY + floorHeight / 2, 5.78);
+                        const wF3 = new THREE.Mesh(new THREE.BoxGeometry(3.0, 1.4, 0.45), wallMat);
+                        wF3.position.set(0, floorY + floorHeight - 0.7, 5.78);
+                        addPiece(wF1, 45);
+                        addPiece(wF2, 45);
+                        addPiece(wF3, 35);
                     }
 
-                    // Side & Back Walls
-                    const wallBack = new THREE.Mesh(new THREE.BoxGeometry(width, floorHeight, 0.4), wallMat);
-                    wallBack.position.set(0, floorY + floorHeight / 2, -5.8);
-                    const wallLeft = new THREE.Mesh(new THREE.BoxGeometry(0.4, floorHeight, depth), wallMat);
-                    wallLeft.position.set(-5.8, floorY + floorHeight / 2, 0);
-                    const wallRight = new THREE.Mesh(new THREE.BoxGeometry(0.4, floorHeight, depth), wallMat);
-                    wallRight.position.set(5.8, floorY + floorHeight / 2, 0);
+                    // Back Wall
+                    const wBack = new THREE.Mesh(new THREE.BoxGeometry(width - 1.2, floorHeight, 0.45), wallMat);
+                    wBack.position.set(0, floorY + floorHeight / 2, -5.78);
+                    addPiece(wBack, 55);
 
-                    buildingGroup.add(wallBack, wallLeft, wallRight);
-                    floorData.parts.push(wallBack, wallLeft, wallRight);
+                    // Left Wall
+                    const wLeft = new THREE.Mesh(new THREE.BoxGeometry(0.45, floorHeight, depth - 1.2), wallMat);
+                    wLeft.position.set(-5.78, floorY + floorHeight / 2, 0);
+                    addPiece(wLeft, 55);
 
-                    // 4. Interior Staircase connecting to next floor
+                    // Right Wall
+                    const wRight = new THREE.Mesh(new THREE.BoxGeometry(0.45, floorHeight, depth - 1.2), wallMat);
+                    wRight.position.set(5.78, floorY + floorHeight / 2, 0);
+                    addPiece(wRight, 55);
+
+                    // 4. Smooth Walk-Up Staircase connecting floors
                     if (f < floorCount - 1) {
-                        const stairRamp = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.2, 5.5), stairMat);
-                        stairRamp.position.set(3.8, floorY + floorHeight / 2, -1.5);
-                        stairRamp.rotation.x = Math.PI / 6; // Angle for climbing
-                        stairRamp.castShadow = true;
-                        buildingGroup.add(stairRamp);
-                        floorData.parts.push(stairRamp);
+                        const stairGroup = new THREE.Group();
+                        const stepCount = 10;
+                        const stepHeight = floorHeight / stepCount;
+                        const stepDepth = 0.55;
+                        const stairWidth = 2.8;
+
+                        for (let s = 0; s < stepCount; s++) {
+                            const stepMesh = new THREE.Mesh(
+                                new THREE.BoxGeometry(stairWidth, stepHeight, stepDepth),
+                                stairMat
+                            );
+                            stepMesh.position.set(0, (s * stepHeight) + stepHeight / 2, (s * stepDepth));
+                            stepMesh.receiveShadow = true;
+                            stepMesh.castShadow = true;
+                            stairGroup.add(stepMesh);
+                        }
+
+                        stairGroup.position.set(3.2, floorY, -3.2);
+                        buildingGroup.add(stairGroup);
 
                         buildingObj.stairs.push({
                             floor: f,
                             bottomY: floorY,
                             topY: floorY + floorHeight,
-                            worldX: posX + 3.8,
-                            worldZ: posZ - 1.5
+                            minX: posX + 3.2 - (stairWidth / 2) - 0.4,
+                            maxX: posX + 3.2 + (stairWidth / 2) + 0.4,
+                            minZ: posZ - 3.2 - 0.4,
+                            maxZ: posZ - 3.2 + (stepCount * stepDepth) + 0.4,
+                            totalZLength: stepCount * stepDepth,
+                            stairGroup: stairGroup
                         });
                     }
-
-                    buildingObj.floors.push(floorData);
                 }
 
                 buildings.push(buildingObj);
@@ -174,105 +196,137 @@ const BuildingsModule = (() => {
         }
     }
 
-    // Apply Explosive / Gunfire Damage to Building & Calculate Leaning Physics
+    // Granular Full-Destruction Pipeline with Physical Debris & Lean Calculation
     function damageBuildingAt(x, y, z, radius, damage, physicsDebrisList, onCollapseCallback) {
         buildings.forEach(b => {
             if (!b.alive) return;
-            const distToBuilding = Math.hypot(b.x - x, b.z - z);
-            if (distToBuilding > radius + b.width / 2 + 2) return;
+            const distToBldg = Math.hypot(b.x - x, b.z - z);
+            if (distToBldg > radius + b.width / 2 + 2) return;
 
-            let damagedPillarCount = 0;
-            let destroyedPillars = { NW: false, NE: false, SW: false, SE: false };
+            let structuralDamaged = false;
 
-            // Check corner pillar damage
-            b.pillars.forEach(p => {
+            // Test damage against every individual piece
+            b.pieces.forEach(p => {
                 if (!p.alive) return;
-                const pDist = Math.hypot(p.worldX - x, p.worldZ - z, p.worldY - y);
-                if (pDist < radius + 1.2) {
+
+                // World position of the individual component
+                const worldPos = new THREE.Vector3();
+                p.mesh.getWorldPosition(worldPos);
+
+                const dist = worldPos.distanceTo(new THREE.Vector3(x, y, z));
+                if (dist < radius + 1.2) {
                     p.health -= damage;
+
                     if (p.health <= 0) {
                         p.alive = false;
                         p.mesh.visible = false;
+                        structuralDamaged = true;
 
-                        // Spawn flying broken pillar chunk
-                        const chunk = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.2, 0.8), new THREE.MeshStandardMaterial({ color: 0x475569 }));
-                        chunk.position.set(p.worldX, p.worldY, p.worldZ);
+                        // Spawn physical flying broken chunk
+                        const boxSize = new THREE.Vector3();
+                        new THREE.Box3().setFromObject(p.mesh).getSize(boxSize);
+
+                        const chunk = new THREE.Mesh(
+                            new THREE.BoxGeometry(Math.max(0.6, boxSize.x * 0.8), Math.max(0.6, boxSize.y * 0.8), Math.max(0.6, boxSize.z * 0.8)),
+                            p.mesh.material
+                        );
+                        chunk.position.copy(worldPos);
                         b.group.parent.add(chunk);
+
+                        const blastDir = new THREE.Vector3().subVectors(worldPos, new THREE.Vector3(x, y, z)).normalize();
+                        const blastForce = (1.0 - (dist / (radius + 2))) * 22;
 
                         physicsDebrisList.push({
                             mesh: chunk,
-                            vx: (p.worldX - x) * 2 + (Math.random() - 0.5) * 6,
-                            vy: 6 + Math.random() * 8,
-                            vz: (p.worldZ - z) * 2 + (Math.random() - 0.5) * 6,
+                            vx: blastDir.x * blastForce + (Math.random() - 0.5) * 6,
+                            vy: Math.max(4, blastDir.y * blastForce + 8 + Math.random() * 8),
+                            vz: blastDir.z * blastForce + (Math.random() - 0.5) * 6,
                             rx: (Math.random() - 0.5) * 6,
                             ry: (Math.random() - 0.5) * 6,
                             rz: (Math.random() - 0.5) * 6,
-                            life: 4.0
+                            life: 4.5
                         });
                     }
                 }
             });
 
-            // Calculate support distribution and resulting Lean Angle
-            let nwDead = b.pillars.filter(p => !p.alive && p.xOffset < 0 && p.zOffset < 0).length;
-            let neDead = b.pillars.filter(p => !p.alive && p.xOffset > 0 && p.zOffset < 0).length;
-            let swDead = b.pillars.filter(p => !p.alive && p.xOffset < 0 && p.zOffset > 0).length;
-            let seDead = b.pillars.filter(p => !p.alive && p.xOffset > 0 && p.zOffset > 0).length;
+            // Calculate support balance across the 4 corners
+            if (structuralDamaged) {
+                const pillars = b.pieces.filter(p => p.isPillar);
+                const nwDead = pillars.filter(p => !p.alive && p.pillarCorner === 'NW').length;
+                const neDead = pillars.filter(p => !p.alive && p.pillarCorner === 'NE').length;
+                const swDead = pillars.filter(p => !p.alive && p.pillarCorner === 'SW').length;
+                const seDead = pillars.filter(p => !p.alive && p.pillarCorner === 'SE').length;
 
-            // Tilt toward damaged sides
-            const leanFactor = 0.08;
-            b.targetLeanX = ((swDead + seDead) - (nwDead + neDead)) * leanFactor;
-            b.targetLeanZ = ((nwDead + swDead) - (neDead + seDead)) * leanFactor;
+                // Dynamic Lean Angles based on missing supports
+                const leanScale = 0.09;
+                b.targetLeanX = ((swDead + seDead) - (nwDead + neDead)) * leanScale;
+                b.targetLeanZ = ((nwDead + swDead) - (neDead + seDead)) * leanScale;
 
-            const totalDeadPillars = nwDead + neDead + swDead + seDead;
-            b.structuralIntegrity = Math.max(0, 100 - (totalDeadPillars / b.pillars.length) * 100);
+                const alivePillars = pillars.filter(p => p.alive).length;
+                const pillarRatio = alivePillars / Math.max(1, pillars.length);
 
-            // Critical failure: if tilted over 22 degrees or over 60% pillars destroyed, topple & collapse!
-            if (!b.collapsed && (Math.abs(b.leanX) > 0.38 || Math.abs(b.leanZ) > 0.38 || b.structuralIntegrity < 30)) {
-                b.collapsed = true;
-                b.alive = false;
+                // If tilted over 22 degrees or over 65% of structural pillars are gone, trigger catastrophic topple & collapse!
+                if (!b.collapsed && (Math.abs(b.leanX) > 0.38 || Math.abs(b.leanZ) > 0.38 || pillarRatio < 0.35)) {
+                    b.collapsed = true;
+                    b.alive = false;
 
-                if (onCollapseCallback) onCollapseCallback(b);
+                    if (onCollapseCallback) onCollapseCallback(b);
 
-                // Scatter physical crumbling floors
-                b.floors.forEach(fl => {
-                    fl.parts.forEach(meshPart => {
-                        meshPart.visible = false;
-                        const rubble = new THREE.Mesh(new THREE.BoxGeometry(3.5, 1.2, 3.5), new THREE.MeshStandardMaterial({ color: 0x334155 }));
-                        rubble.position.set(b.x + (Math.random() - 0.5) * b.width, fl.y + 2, b.z + (Math.random() - 0.5) * b.depth);
-                        b.group.parent.add(rubble);
+                    // Scatter all remaining pieces into tumbling physics rubble
+                    b.pieces.forEach(p => {
+                        if (p.alive) {
+                            p.alive = false;
+                            p.mesh.visible = false;
 
-                        physicsDebrisList.push({
-                            mesh: rubble,
-                            vx: b.leanZ * 20 + (Math.random() - 0.5) * 10,
-                            vy: 4 + Math.random() * 8,
-                            vz: b.leanX * 20 + (Math.random() - 0.5) * 10,
-                            rx: (Math.random() - 0.5) * 4,
-                            ry: (Math.random() - 0.5) * 4,
-                            rz: (Math.random() - 0.5) * 4,
-                            life: 5.0
-                        });
+                            const worldPos = new THREE.Vector3();
+                            p.mesh.getWorldPosition(worldPos);
+
+                            const rubble = new THREE.Mesh(
+                                new THREE.BoxGeometry(2.5, 1.2, 2.5),
+                                p.mesh.material
+                            );
+                            rubble.position.copy(worldPos);
+                            b.group.parent.add(rubble);
+
+                            physicsDebrisList.push({
+                                mesh: rubble,
+                                vx: b.leanZ * 22 + (Math.random() - 0.5) * 10,
+                                vy: 4 + Math.random() * 8,
+                                vz: b.leanX * 22 + (Math.random() - 0.5) * 10,
+                                rx: (Math.random() - 0.5) * 5,
+                                ry: (Math.random() - 0.5) * 5,
+                                rz: (Math.random() - 0.5) * 5,
+                                life: 5.0
+                            });
+                        }
                     });
-                });
+                }
             }
         });
     }
 
-    // Smooth Leaning Physics Interpolation
+    // Leaning Physics Simulation
     function update(delta) {
         buildings.forEach(b => {
             if (!b.alive || b.collapsed) return;
 
-            // Interpolate toward target lean tilt
-            b.leanX += (b.targetLeanX - b.leanX) * 3.0 * delta;
-            b.leanZ += (b.targetLeanZ - b.leanZ) * 3.0 * delta;
+            // Spring-damper leaning torque
+            const forceX = (b.targetLeanX - b.leanX) * 15.0;
+            const forceZ = (b.targetLeanZ - b.leanZ) * 15.0;
+
+            b.angularVelocityX = (b.angularVelocityX + forceX * delta) * 0.88;
+            b.angularVelocityZ = (b.angularVelocityZ + forceZ * delta) * 0.88;
+
+            b.leanX += b.angularVelocityX * delta;
+            b.leanZ += b.angularVelocityZ * delta;
 
             b.group.rotation.x = b.leanX;
             b.group.rotation.z = b.leanZ;
         });
     }
 
-    // Doorway & Interior Staircase Navigation for FPV Player & NPCs
+    // Smooth & Responsive Interior Stair Climbing and Floor Elevation
     function checkPlayerInterior(playerX, playerZ, currentY) {
         let insideBuilding = null;
         let groundHeight = 0;
@@ -282,22 +336,24 @@ const BuildingsModule = (() => {
             const halfW = b.width / 2;
             const halfD = b.depth / 2;
 
-            if (Math.abs(playerX - b.x) < halfW - 0.4 && Math.abs(playerZ - b.z) < halfD - 0.4) {
+            if (Math.abs(playerX - b.x) < halfW - 0.3 && Math.abs(playerZ - b.z) < halfD - 0.3) {
                 insideBuilding = b;
 
-                // Check interior stairs climbing
-                b.stairs.forEach(st => {
-                    const distToStair = Math.hypot(playerX - st.worldX, playerZ - st.worldZ);
-                    if (distToStair < 2.2) {
-                        const progress = Math.max(0, Math.min(1, (playerZ - (st.worldZ - 2.5)) / 5.0));
-                        groundHeight = Math.max(groundHeight, st.bottomY + progress * (st.topY - st.bottomY));
+                // Check Stair Climbing
+                for (let st of b.stairs) {
+                    if (playerX >= st.minX && playerX <= st.maxX && playerZ >= st.minZ && playerZ <= st.maxZ) {
+                        const progress = Math.max(0, Math.min(1, (playerZ - st.minZ) / st.totalZLength));
+                        const stairElevation = st.bottomY + progress * (st.topY - st.bottomY);
+                        groundHeight = Math.max(groundHeight, stairElevation);
                     }
-                });
+                }
 
-                // Floor level elevation
-                const floorIndex = Math.floor(currentY / 4.0);
-                if (floorIndex > 0) {
-                    groundHeight = Math.max(groundHeight, floorIndex * 4.0);
+                // If not on stairs, snap to current floor slab level
+                if (groundHeight === 0) {
+                    const floorIdx = Math.floor((currentY + 0.5) / 4.2);
+                    if (floorIdx > 0 && floorIdx < b.floorCount) {
+                        groundHeight = floorIdx * 4.2;
+                    }
                 }
                 break;
             }
