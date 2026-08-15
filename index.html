@@ -134,7 +134,7 @@
         }
         .stat-val.red { color: #f87171; }
 
-        /* Arsenal Selector */
+        /* Dynamic Arsenal Selector */
         .arsenal-bar {
             pointer-events: auto;
             display: flex;
@@ -164,7 +164,7 @@
             box-shadow: 0 0 12px rgba(56, 189, 248, 0.5);
         }
 
-        /* Top Action Buttons */
+        /* Top Controls */
         .controls-top {
             pointer-events: auto;
             display: flex;
@@ -312,11 +312,11 @@
             </div>
         </div>
 
-        <!-- Arsenal Selection -->
-        <div class="arsenal-bar">
-            <button class="weap-btn active" data-type="CRUISE">1: CRUISE MISSILE</button>
-            <button class="weap-btn" data-type="CLUSTER">2: CLUSTER BARRAGE</button>
-            <button class="weap-btn" data-type="LASER">3: ORBITAL BEAM</button>
+        <!-- Dynamic Arsenal Selector (Switches between Commander Missiles & FPV Guns) -->
+        <div class="arsenal-bar" id="arsenal-container">
+            <button class="weap-btn active" id="btn-w1" data-cmd="CRUISE" data-fpv="AK47">1: CRUISE MISSILE</button>
+            <button class="weap-btn" id="btn-w2" data-cmd="CLUSTER" data-fpv="GRENADE">2: CLUSTER BARRAGE</button>
+            <button class="weap-btn" id="btn-w3" data-cmd="LASER" data-fpv="RPG">3: ORBITAL BEAM</button>
         </div>
     </div>
 
@@ -328,8 +328,10 @@
         <div class="mobile-fire-btn" id="btn-mobile-fire">FIRE</div>
     </div>
 
-    <!-- MAIN GAME LOGIC SCRIPT -->
+    <!-- MODULAR GAME SCRIPTS (LOADED IN SEQUENCE) -->
     <script src="orbitalCannon.js"></script>
+    <script src="buildings.js"></script>
+    <script src="weapons.js"></script>
     <script src="game.js"></script>
 </body>
 </html>
