@@ -1,9 +1,9 @@
 /* =========================================================================
-   CITY COMMANDER: MAIN GAME LOGIC (game.js)
-   Integrates with orbitalCannon.js, Three.js, and the DOM HUD.
+   CITY COMMANDER: MAIN GAME CONTROLLER (game.js)
+   Binds together orbitalCannon.js, buildings.js, weapons.js, and Three.js.
    ========================================================================= */
 
-// Prevent default mobile browser gestures
+// Prevent default mobile browser pull/overscroll gestures
 document.addEventListener('touchmove', (e) => { e.preventDefault(); }, { passive: false });
 
 /* --- START BUTTON & MODAL INITIALIZATION --- */
@@ -127,7 +127,7 @@ function playLaunchSound() {
     } catch(e) {}
 }
 
-/* --- 2. THREE.JS ENGINE SETUP --- */
+/* --- 2. THREE.JS ENGINE INITIALIZATION --- */
 const container = document.getElementById('canvas-container');
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x080e18);
@@ -157,19 +157,19 @@ sunLight.shadow.camera.top = 110;
 sunLight.shadow.camera.bottom = -110;
 scene.add(sunLight);
 
-if (typeof OrbitalCannonModule !== 'undefined') {
-    OrbitalCannonModule.init(scene);
-}
+// Initialize External Modules
+if (typeof OrbitalCannonModule !== 'undefined') OrbitalCannonModule.init(scene);
+if (typeof BuildingsModule !== 'undefined') BuildingsModule.init(scene, 6, 22, 66);
+if (typeof WeaponsModule !== 'undefined') WeaponsModule.init(scene, camera);
 
-/* --- 3. GAME STATE --- */
+/* --- 3. GLOBAL GAME STATE --- */
 let isFPV = false;
-let selectedWeapon = 'CRUISE';
+let selectedWeaponCmd = 'CRUISE';
+let selectedWeaponFpv = 'AK47';
 let collateralDamageMillions = 0;
 let aliveCivilians = 0;
-let activeBuildings = 0;
 let inCutscene = false;
 
-const buildings = [];
 const npcs = [];
 const cars = [];
 const shelters = [];
@@ -180,6 +180,7 @@ const physicsBlocks = [];
 // FPV Camera Player
 const player = {
     x: 0,
+    y: 0,
     z: 40,
     yaw: 0,
     pitch: 0,
@@ -195,28 +196,7 @@ const commanderCam = {
     targetZ: 0
 };
 
-/* --- 4. ENVIRONMENT: ASPHALT ROADS & CONCRETE SIDEWALKS --- */
-function createBuildingTexture() {
-    const canvas = document.createElement('canvas');
-    canvas.width = 128;
-    canvas.height = 128;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#1e293b';
-    ctx.fillRect(0, 0, 128, 128);
-    for (let y = 8; y < 120; y += 22) {
-        for (let x = 8; x < 120; x += 18) {
-            ctx.fillStyle = (Math.random() > 0.35) ? (Math.random() > 0.7 ? '#fef08a' : '#38bdf8') : '#0f172a';
-            ctx.fillRect(x, y, 10, 14);
-        }
-    }
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.wrapS = THREE.RepeatWrapping;
-    texture.wrapT = THREE.RepeatWrapping;
-    return texture;
-}
-
-const bldgTexture = createBuildingTexture();
-
+/* --- 4. ENVIRONMENT: ASPHALT ROADS & SIDEWALKS --- */
 const groundGeo = new THREE.PlaneGeometry(240, 240);
 const groundMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.9 });
 const ground = new THREE.Mesh(groundGeo, groundMat);
@@ -226,21 +206,23 @@ scene.add(ground);
 
 const cityGridSize = 6;
 const blockSpacing = 22;
-const halfSize = (cityGridSize * blockSpacing) / 2;
+const halfSize = (cityGridSize * blockSpacing) / 2; // 66
 
+// Elevated Concrete Sidewalks
 const sidewalkMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.8 });
 for (let gx = 0; gx < cityGridSize; gx++) {
     for (let gz = 0; gz < cityGridSize; gz++) {
         const posX = (gx * blockSpacing) - halfSize + blockSpacing / 2;
         const posZ = (gz * blockSpacing) - halfSize + blockSpacing / 2;
 
-        const sidewalkMesh = new THREE.Mesh(new THREE.BoxGeometry(16, 0.25, 16), sidewalkMat);
+        const sidewalkMesh = new THREE.Mesh(new THREE.BoxGeometry(16.5, 0.25, 16.5), sidewalkMat);
         sidewalkMesh.position.set(posX, 0.125, posZ);
         sidewalkMesh.receiveShadow = true;
         scene.add(sidewalkMesh);
     }
 }
 
+// Road Divider Stripes
 const roadLineMat = new THREE.MeshBasicMaterial({ color: 0xfacc15 });
 const roadAvenues = [-44, -22, 0, 22, 44];
 
@@ -275,60 +257,7 @@ targetGroup.add(beaconBeam);
 targetGroup.position.set(0, 0.1, 0);
 scene.add(targetGroup);
 
-/* --- 6. STRUCTURAL BUILDINGS --- */
-for (let gx = 0; gx < cityGridSize; gx++) {
-    for (let gz = 0; gz < cityGridSize; gz++) {
-        const posX = (gx * blockSpacing) - halfSize + blockSpacing / 2;
-        const posZ = (gz * blockSpacing) - halfSize + blockSpacing / 2;
-
-        const floorCount = 4 + Math.floor(Math.random() * 5);
-        const floorHeight = 4.0;
-        const width = 11;
-        const depth = 11;
-        const totalHeight = floorCount * floorHeight;
-
-        const buildingObj = {
-            x: posX,
-            z: posZ,
-            width: width,
-            depth: depth,
-            alive: true,
-            totalHeight: totalHeight,
-            floors: []
-        };
-
-        for (let f = 0; f < floorCount; f++) {
-            const floorY = (f * floorHeight) + (floorHeight / 2) + 0.25;
-            const fGeo = new THREE.BoxGeometry(width, floorHeight, depth);
-            const fMat = new THREE.MeshStandardMaterial({
-                map: bldgTexture,
-                roughness: 0.5,
-                metalness: 0.2
-            });
-            const floorMesh = new THREE.Mesh(fGeo, fMat);
-            floorMesh.position.set(posX, floorY, posZ);
-            floorMesh.castShadow = true;
-            floorMesh.receiveShadow = true;
-            scene.add(floorMesh);
-
-            buildingObj.floors.push({
-                mesh: floorMesh,
-                floorIndex: f,
-                y: floorY,
-                height: floorHeight,
-                health: 70,
-                isStatic: true
-            });
-        }
-
-        buildings.push(buildingObj);
-    }
-}
-activeBuildings = buildings.length;
-const hudBldgs = document.getElementById('hud-buildings');
-if (hudBldgs) hudBldgs.innerText = activeBuildings;
-
-/* --- 7. DESTRUCTIBLE SIDEWALK STALLS & SHELTERS --- */
+/* --- 6. DESTRUCTIBLE SIDEWALK STALLS & SHELTERS --- */
 function createStreetShelter(x, z, angle = 0) {
     const group = new THREE.Group();
     
@@ -361,14 +290,14 @@ for (let gx = 0; gx < cityGridSize; gx++) {
         if ((gx + gz) % 2 === 0) {
             const blockCenterX = (gx * blockSpacing) - halfSize + blockSpacing / 2;
             const blockCenterZ = (gz * blockSpacing) - halfSize + blockSpacing / 2;
-            const sx = blockCenterX + (gx < cityGridSize / 2 ? 6.8 : -6.8);
+            const sx = blockCenterX + (gx < cityGridSize / 2 ? 7.2 : -7.2);
             const sz = blockCenterZ;
             createStreetShelter(sx, sz, 0);
         }
     }
 }
 
-/* --- 8. DEDICATED LANE CIVILIAN CARS --- */
+/* --- 7. DEDICATED LANE CIVILIAN CARS --- */
 const carColors = [0xef4444, 0x38bdf8, 0xfacc15, 0xf8fafc, 0x10b981];
 
 function createCarMesh(color) {
@@ -452,7 +381,7 @@ roadAvenues.forEach((avenuePos) => {
     });
 });
 
-/* --- 9. BLOCKY 3D SMART NPCS --- */
+/* --- 8. BLOCKY 3D SMART NPCS --- */
 const shirtColors = [0x38bdf8, 0xef4444, 0x10b981, 0xf59e0b, 0xa855f7];
 
 function createBlockyNPCMesh(shirtColor) {
@@ -522,10 +451,9 @@ for (let i = 0; i < 45; i++) {
     });
 }
 aliveCivilians = npcs.length;
-const hudCivs = document.getElementById('hud-civilians');
-if (hudCivs) hudCivs.innerText = aliveCivilians;
+updateHUD();
 
-/* --- 10. EXPLOSION & STRUCTURAL DESTRUCTION --- */
+/* --- 9. EXPLOSION & DESTRUCTION PIPELINE --- */
 function triggerExplosion(x, y, z, radius = 14, damage = 100) {
     playExplosionSound(radius > 16 ? 1.6 : 1.1);
 
@@ -537,73 +465,15 @@ function triggerExplosion(x, y, z, radius = 14, damage = 100) {
     scene.add(blastMesh);
     particles.push({ mesh: blastMesh, scaleSpeed: 26, fadeSpeed: 3.2, maxScale: radius * 1.5 });
 
-    buildings.forEach(b => {
-        let anyFloorDestroyed = false;
-
-        b.floors.forEach((floor) => {
-            if (!floor.isStatic) return;
-
-            const floorWorldPos = new THREE.Vector3(b.x, floor.y, b.z);
-            const dist = floorWorldPos.distanceTo(new THREE.Vector3(x, y, z));
-
-            if (dist < radius + b.width / 2) {
-                floor.health -= damage;
-
-                if (floor.health <= 0) {
-                    anyFloorDestroyed = true;
-                    floor.isStatic = false;
-
-                    const blastDir = new THREE.Vector3().subVectors(floorWorldPos, new THREE.Vector3(x, y, z)).normalize();
-                    const force = (1.0 - (dist / (radius + b.width))) * 35;
-
-                    physicsBlocks.push({
-                        mesh: floor.mesh,
-                        vx: blastDir.x * force + (Math.random() - 0.5) * 8,
-                        vy: Math.max(8, blastDir.y * force + 12 + Math.random() * 10),
-                        vz: blastDir.z * force + (Math.random() - 0.5) * 8,
-                        rx: (Math.random() - 0.5) * 4,
-                        ry: (Math.random() - 0.5) * 4,
-                        rz: (Math.random() - 0.5) * 4,
-                        life: 6.0
-                    });
-
-                    collateralDamageMillions += 8;
-                    updateHUD();
-                }
-            }
+    // Apply destruction and structural leaning physics to buildings
+    if (typeof BuildingsModule !== 'undefined') {
+        BuildingsModule.damageBuildingAt(x, y, z, radius, damage, physicsBlocks, (collapsedBuilding) => {
+            collateralDamageMillions += Math.floor(collapsedBuilding.totalHeight * 2.5);
+            updateHUD();
         });
+    }
 
-        if (anyFloorDestroyed) {
-            for (let f = 0; f < b.floors.length; f++) {
-                if (!b.floors[f].isStatic) {
-                    for (let above = f + 1; above < b.floors.length; above++) {
-                        const aboveFloor = b.floors[above];
-                        if (aboveFloor.isStatic) {
-                            aboveFloor.isStatic = false;
-                            physicsBlocks.push({
-                                mesh: aboveFloor.mesh,
-                                vx: (Math.random() - 0.5) * 4,
-                                vy: -2,
-                                vz: (Math.random() - 0.5) * 4,
-                                rx: (Math.random() - 0.5) * 1.5,
-                                ry: (Math.random() - 0.5) * 1.5,
-                                rz: (Math.random() - 0.5) * 1.5,
-                                life: 5.0
-                            });
-                        }
-                    }
-                    break;
-                }
-            }
-
-            if (b.alive && b.floors.every(fl => !fl.isStatic)) {
-                b.alive = false;
-                activeBuildings--;
-                updateHUD();
-            }
-        }
-    });
-
+    // Destroy Sidewalk Stalls
     shelters.forEach(sh => {
         if (!sh.alive) return;
         const dist = Math.hypot(sh.x - x, sh.z - z);
@@ -628,6 +498,7 @@ function triggerExplosion(x, y, z, radius = 14, damage = 100) {
         }
     });
 
+    // Destroy Civilian Cars
     cars.forEach(car => {
         if (!car.alive) return;
         const dist = Math.hypot(car.x - x, car.z - z);
@@ -649,6 +520,7 @@ function triggerExplosion(x, y, z, radius = 14, damage = 100) {
         }
     });
 
+    // Panic & Casualty handling for NPCs
     npcs.forEach(npc => {
         if (!npc.alive) return;
         const dist = Math.hypot(npc.x - x, npc.z - z);
@@ -691,15 +563,15 @@ function updateHUD() {
     const bEl = document.getElementById('hud-buildings');
     const clEl = document.getElementById('hud-collateral');
     if (cEl) cEl.innerText = aliveCivilians;
-    if (bEl) bEl.innerText = activeBuildings;
+    if (bEl && typeof BuildingsModule !== 'undefined') bEl.innerText = BuildingsModule.getActiveCount();
     if (clEl) clEl.innerText = `$${collateralDamageMillions}M`;
 }
 
-/* --- 11. WEAPON LAUNCHERS & ORBITAL CUTSCENE --- */
-function launchArsenalStrike(targetPos) {
+/* --- 10. WEAPON LAUNCHERS & FIRING PIPELINE --- */
+function launchCommanderStrike(targetPos) {
     initAudio();
 
-    if (selectedWeapon === 'CRUISE') {
+    if (selectedWeaponCmd === 'CRUISE') {
         playLaunchSound();
         const missile = createCruiseMissileModule();
         missile.position.set(targetPos.x + 25, 95, targetPos.z + 25);
@@ -714,7 +586,7 @@ function launchArsenalStrike(targetPos) {
             damage: 180
         });
     } 
-    else if (selectedWeapon === 'CLUSTER') {
+    else if (selectedWeaponCmd === 'CLUSTER') {
         playLaunchSound();
         for (let i = 0; i < 6; i++) {
             setTimeout(() => {
@@ -735,7 +607,7 @@ function launchArsenalStrike(targetPos) {
             }, i * 140);
         }
     } 
-    else if (selectedWeapon === 'LASER') {
+    else if (selectedWeaponCmd === 'LASER') {
         playOrbitalChargeSound();
         inCutscene = true;
 
@@ -804,7 +676,7 @@ function createClusterDispenserModule() {
     return group;
 }
 
-/* --- 12. RAYCASTING & AIMING --- */
+/* --- 11. RAYCASTING & INPUT DISPATCH --- */
 const raycaster = new THREE.Raycaster();
 const mousePos = new THREE.Vector2();
 let targetAimPoint = new THREE.Vector3(0, 0, 0);
@@ -825,7 +697,6 @@ function updateRaycastToPoint(screenX, screenY) {
 window.addEventListener('mousemove', (e) => {
     if (inCutscene) return;
     if (isFPV) {
-        // Smooth FPV looking without locking bug
         player.yaw -= e.movementX * 0.0028;
         player.pitch -= e.movementY * 0.0028;
         player.pitch = Math.max(-Math.PI / 2.5, Math.min(Math.PI / 2.5, player.pitch));
@@ -839,21 +710,36 @@ window.addEventListener('click', (e) => {
         if (document.pointerLockElement !== document.body && !('ontouchstart' in window)) {
             document.body.requestPointerLock();
         }
-        launchArsenalStrike(targetAimPoint);
+
+        // Fire First-Person Infantry Weapon (AK-47 / Grenade / RPG)
+        if (typeof WeaponsModule !== 'undefined') {
+            WeaponsModule.fire(player, camera, scene, audioCtx, {
+                getShootables: () => [ground, ...cars.map(c => c.group), ...npcs.map(n => n.group), ...scene.children],
+                onBulletHit: (hitPos, hitObj) => {
+                    // Check if bullet struck building support or NPC
+                    if (typeof BuildingsModule !== 'undefined') {
+                        BuildingsModule.damageBuildingAt(hitPos.x, hitPos.y, hitPos.z, 2.5, 35, physicsBlocks, (collapsed) => {
+                            collateralDamageMillions += Math.floor(collapsed.totalHeight * 2.5);
+                            updateHUD();
+                        });
+                    }
+                }
+            });
+        }
     } else {
         updateRaycastToPoint(e.clientX, e.clientY);
-        launchArsenalStrike(targetAimPoint);
+        launchCommanderStrike(targetAimPoint);
     }
 });
 
-/* --- 13. KEYBOARD & UI CONTROLS --- */
+/* --- 12. DYNAMIC HUD & WEAPON TOGGLE --- */
 const keys = {};
 window.addEventListener('keydown', (e) => {
     if (inCutscene) return;
     keys[e.code] = true;
-    if (e.code === 'Digit1') setWeapon('CRUISE');
-    if (e.code === 'Digit2') setWeapon('CLUSTER');
-    if (e.code === 'Digit3') setWeapon('LASER');
+    if (e.code === 'Digit1') setWeaponSlot(1);
+    if (e.code === 'Digit2') setWeaponSlot(2);
+    if (e.code === 'Digit3') setWeaponSlot(3);
     if (e.code === 'Tab') {
         e.preventDefault();
         toggleCameraMode();
@@ -861,15 +747,40 @@ window.addEventListener('keydown', (e) => {
 });
 window.addEventListener('keyup', (e) => { keys[e.code] = false; });
 
-function setWeapon(type) {
-    selectedWeapon = type;
-    document.querySelectorAll('.weap-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.type === type);
+function setWeaponSlot(slotIndex) {
+    document.querySelectorAll('.weap-btn').forEach((btn, idx) => {
+        const isActive = (idx + 1 === slotIndex);
+        btn.classList.toggle('active', isActive);
+        if (isActive) {
+            if (isFPV) {
+                selectedWeaponFpv = btn.dataset.fpv;
+                if (typeof WeaponsModule !== 'undefined') WeaponsModule.setWeapon(selectedWeaponFpv);
+            } else {
+                selectedWeaponCmd = btn.dataset.cmd;
+            }
+        }
     });
 }
 
-document.querySelectorAll('.weap-btn').forEach(btn => {
-    btn.addEventListener('click', () => setWeapon(btn.dataset.type));
+function updateHUDWeaponLabels() {
+    const b1 = document.getElementById('btn-w1');
+    const b2 = document.getElementById('btn-w2');
+    const b3 = document.getElementById('btn-w3');
+
+    if (isFPV) {
+        if (b1) b1.innerText = '1: AK-47 RIFLE';
+        if (b2) b2.innerText = '2: FRAG GRENADE';
+        if (b3) b3.innerText = '3: RPG ROCKET';
+        if (typeof WeaponsModule !== 'undefined') WeaponsModule.setWeapon(selectedWeaponFpv);
+    } else {
+        if (b1) b1.innerText = '1: CRUISE MISSILE';
+        if (b2) b2.innerText = '2: CLUSTER BARRAGE';
+        if (b3) b3.innerText = '3: ORBITAL BEAM';
+    }
+}
+
+document.querySelectorAll('.weap-btn').forEach((btn, idx) => {
+    btn.addEventListener('click', () => setWeaponSlot(idx + 1));
 });
 
 function toggleCameraMode() {
@@ -883,6 +794,8 @@ function toggleCameraMode() {
     if (toggleEl) toggleEl.innerText = isFPV ? 'SWITCH TO DRONE [TAB]' : 'SWITCH TO FPV [TAB]';
     if (reticleEl) reticleEl.style.display = isFPV ? 'block' : 'none';
 
+    updateHUDWeaponLabels();
+
     if (isFPV && !('ontouchstart' in window)) {
         document.body.requestPointerLock();
     } else {
@@ -893,7 +806,7 @@ function toggleCameraMode() {
 const camBtn = document.getElementById('btn-toggle-cam');
 if (camBtn) camBtn.addEventListener('click', toggleCameraMode);
 
-/* --- 14. MOBILE TOUCH CONTROLS --- */
+/* --- 13. MOBILE TOUCH CONTROLS --- */
 const joystick = { active: false, startX: 0, startY: 0, moveX: 0, moveY: 0 };
 const joystickZone = document.getElementById('joystick-container');
 const joystickKnob = document.getElementById('joystick-knob');
@@ -979,12 +892,29 @@ if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
     if (mobFire) {
         mobFire.addEventListener('touchstart', (e) => {
             e.stopPropagation();
-            if (!inCutscene) launchArsenalStrike(targetAimPoint);
+            if (inCutscene) return;
+            if (isFPV) {
+                if (typeof WeaponsModule !== 'undefined') {
+                    WeaponsModule.fire(player, camera, scene, audioCtx, {
+                        getShootables: () => [ground, ...cars.map(c => c.group), ...npcs.map(n => n.group), ...scene.children],
+                        onBulletHit: (hitPos) => {
+                            if (typeof BuildingsModule !== 'undefined') {
+                                BuildingsModule.damageBuildingAt(hitPos.x, hitPos.y, hitPos.z, 2.5, 35, physicsBlocks, (collapsed) => {
+                                    collateralDamageMillions += Math.floor(collapsed.totalHeight * 2.5);
+                                    updateHUD();
+                                });
+                            }
+                        }
+                    });
+                }
+            } else {
+                launchCommanderStrike(targetAimPoint);
+            }
         });
     }
 }
 
-/* --- 15. MAIN SIMULATION LOOP --- */
+/* --- 14. MAIN SIMULATION & ANIMATION LOOP --- */
 const clock = new THREE.Clock();
 
 function animate() {
@@ -993,10 +923,27 @@ function animate() {
 
     targetRing.scale.setScalar(1 + Math.sin(Date.now() * 0.008) * 0.12);
 
+    // 1. Update Space Sector via orbitalCannon.js
     if (typeof OrbitalCannonModule !== 'undefined') {
         OrbitalCannonModule.update(delta, inCutscene, 0, camera, scene);
     }
 
+    // 2. Update Leaning Buildings & Physics via buildings.js
+    if (typeof BuildingsModule !== 'undefined') {
+        BuildingsModule.update(delta);
+    }
+
+    // 3. Update FPV Weapons & Projectiles via weapons.js
+    let isMoving = (keys['KeyW'] || keys['KeyS'] || keys['KeyA'] || keys['KeyD'] || joystick.active);
+    if (typeof WeaponsModule !== 'undefined') {
+        WeaponsModule.update(delta, camera, isFPV, scene, isMoving, {
+            onExplode: (x, y, z, radius, damage) => {
+                triggerExplosion(x, y, z, radius, damage);
+            }
+        });
+    }
+
+    // 4. Update Commander Missiles
     for (let i = missiles.length - 1; i >= 0; i--) {
         const m = missiles[i];
         const dir = new THREE.Vector3().subVectors(m.target, m.mesh.position);
@@ -1011,6 +958,7 @@ function animate() {
         }
     }
 
+    // 5. Update Particle Bursts
     for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
         p.mesh.scale.addScalar(p.scaleSpeed * delta);
@@ -1021,6 +969,7 @@ function animate() {
         }
     }
 
+    // 6. Update Structural Physics Debris
     for (let i = physicsBlocks.length - 1; i >= 0; i--) {
         const d = physicsBlocks[i];
         d.vy -= 26 * delta;
@@ -1047,6 +996,7 @@ function animate() {
         }
     }
 
+    // 7. Update Dedicated Lane Traffic
     cars.forEach(car => {
         if (!car.alive) return;
 
@@ -1085,6 +1035,7 @@ function animate() {
         car.group.position.set(car.x, 0, car.z);
     });
 
+    // 8. Update Smart NPCs
     npcs.forEach(npc => {
         if (!npc.alive) return;
 
@@ -1118,14 +1069,6 @@ function animate() {
         let obstacleAhead = false;
         if (Math.abs(forwardProbeX) > 62 || Math.abs(forwardProbeZ) > 62) {
             obstacleAhead = true;
-        } else {
-            for (let b of buildings) {
-                if (!b.alive) continue;
-                if (Math.abs(forwardProbeX - b.x) < b.width / 2 + 1.0 && Math.abs(forwardProbeZ - b.z) < b.depth / 2 + 1.0) {
-                    obstacleAhead = true;
-                    break;
-                }
-            }
         }
 
         if (obstacleAhead && npc.state !== 'HIDING') {
@@ -1133,21 +1076,8 @@ function animate() {
         }
 
         if (npc.state !== 'HIDING') {
-            let nextX = npc.x + Math.sin(npc.angle) * npc.speed * delta;
-            let nextZ = npc.z + Math.cos(npc.angle) * npc.speed * delta;
-
-            buildings.forEach(b => {
-                if (!b.alive) return;
-                const halfW = b.width / 2 + 0.6;
-                const halfD = b.depth / 2 + 0.6;
-                if (Math.abs(nextX - b.x) < halfW && Math.abs(nextZ - b.z) < halfD) {
-                    if (Math.abs(npc.x - b.x) >= halfW) nextX = npc.x;
-                    if (Math.abs(npc.z - b.z) >= halfD) nextZ = npc.z;
-                }
-            });
-
-            npc.x = nextX;
-            npc.z = nextZ;
+            npc.x += Math.sin(npc.angle) * npc.speed * delta;
+            npc.z += Math.cos(npc.angle) * npc.speed * delta;
         }
 
         npc.group.position.x = npc.x;
@@ -1173,6 +1103,7 @@ function animate() {
         }
     });
 
+    // 9. Camera Navigation, FPV Interior Climbing & Movement
     if (!inCutscene) {
         if (isFPV) {
             if (keys['ArrowLeft']) player.yaw += 2.0 * delta;
@@ -1201,10 +1132,18 @@ function animate() {
             player.x += (forwardX * -moveZ + sideX * moveX) * player.speed * delta;
             player.z += (forwardZ * -moveZ + sideZ * moveX) * player.speed * delta;
 
-            camera.position.set(player.x, 1.8, player.z);
+            // Check if player is inside a building or climbing stairs
+            let targetY = 0;
+            if (typeof BuildingsModule !== 'undefined') {
+                const interiorCheck = BuildingsModule.checkPlayerInterior(player.x, player.z, player.y);
+                targetY = interiorCheck.groundHeight;
+            }
+            player.y = THREE.MathUtils.lerp(player.y, targetY, delta * 12);
+
+            camera.position.set(player.x, 1.8 + player.y, player.z);
             const lookTarget = new THREE.Vector3(
                 player.x - Math.sin(player.yaw) * Math.cos(player.pitch),
-                1.8 + Math.sin(player.pitch),
+                1.8 + player.y + Math.sin(player.pitch),
                 player.z - Math.cos(player.yaw) * Math.cos(player.pitch)
             );
             camera.lookAt(lookTarget);
