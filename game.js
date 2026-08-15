@@ -3,8 +3,18 @@
    Binds together orbitalCannon.js, buildings.js, weapons.js, and Three.js.
    ========================================================================= */
 
-// Prevent default mobile browser pull/overscroll gestures
+// 1. Prevent mobile browser gesture zooms, pull-to-refresh, and double-tap zoom lockups
 document.addEventListener('touchmove', (e) => { e.preventDefault(); }, { passive: false });
+window.addEventListener('dblclick', (e) => { e.preventDefault(); }, { passive: false });
+
+let lastTouchEndTime = 0;
+document.addEventListener('touchend', (e) => {
+    const now = Date.now();
+    if (now - lastTouchEndTime <= 350) {
+        e.preventDefault();
+    }
+    lastTouchEndTime = now;
+}, { passive: false });
 
 /* --- START BUTTON & MODAL INITIALIZATION --- */
 document.addEventListener('DOMContentLoaded', initModal);
@@ -21,7 +31,7 @@ function initModal() {
     }
 }
 
-/* --- 1. PROCEDURAL SOUND SYNTHESIZER --- */
+/* --- 2. PROCEDURAL SOUND SYNTHESIZER --- */
 const AudioCtx = window.AudioContext || window.webkitAudioContext;
 let audioCtx = null;
 
@@ -127,7 +137,7 @@ function playLaunchSound() {
     } catch(e) {}
 }
 
-/* --- 2. THREE.JS ENGINE INITIALIZATION --- */
+/* --- 3. THREE.JS ENGINE INITIALIZATION --- */
 const container = document.getElementById('canvas-container');
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x080e18);
@@ -162,7 +172,7 @@ if (typeof OrbitalCannonModule !== 'undefined') OrbitalCannonModule.init(scene);
 if (typeof BuildingsModule !== 'undefined') BuildingsModule.init(scene, 6, 22, 66);
 if (typeof WeaponsModule !== 'undefined') WeaponsModule.init(scene, camera);
 
-/* --- 3. GLOBAL GAME STATE --- */
+/* --- 4. GLOBAL GAME STATE --- */
 let isFPV = false;
 let selectedWeaponCmd = 'CRUISE';
 let selectedWeaponFpv = 'AK47';
@@ -196,7 +206,7 @@ const commanderCam = {
     targetZ: 0
 };
 
-/* --- 4. ENVIRONMENT: ASPHALT ROADS & SIDEWALKS --- */
+/* --- 5. ENVIRONMENT: ROADS & SIDEWALKS --- */
 const groundGeo = new THREE.PlaneGeometry(240, 240);
 const groundMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.9 });
 const ground = new THREE.Mesh(groundGeo, groundMat);
@@ -238,7 +248,7 @@ roadAvenues.forEach(avenue => {
     scene.add(lineEW);
 });
 
-/* --- 5. STABLE TARGETING BEACON --- */
+/* --- 6. TARGETING BEACON --- */
 const targetGroup = new THREE.Group();
 const targetMarkerGeo = new THREE.RingGeometry(2.0, 2.7, 32);
 const targetMarkerMat = new THREE.MeshBasicMaterial({ color: 0xff2222, side: THREE.DoubleSide, transparent: true, opacity: 0.9 });
@@ -257,7 +267,7 @@ targetGroup.add(beaconBeam);
 targetGroup.position.set(0, 0.1, 0);
 scene.add(targetGroup);
 
-/* --- 6. DESTRUCTIBLE SIDEWALK STALLS & SHELTERS --- */
+/* --- 7. DESTRUCTIBLE SIDEWALK STALLS & SHELTERS --- */
 function createStreetShelter(x, z, angle = 0) {
     const group = new THREE.Group();
     
@@ -297,7 +307,7 @@ for (let gx = 0; gx < cityGridSize; gx++) {
     }
 }
 
-/* --- 7. DEDICATED LANE CIVILIAN CARS --- */
+/* --- 8. DEDICATED LANE CIVILIAN CARS --- */
 const carColors = [0xef4444, 0x38bdf8, 0xfacc15, 0xf8fafc, 0x10b981];
 
 function createCarMesh(color) {
@@ -381,7 +391,7 @@ roadAvenues.forEach((avenuePos) => {
     });
 });
 
-/* --- 8. BLOCKY 3D SMART NPCS --- */
+/* --- 9. BLOCKY 3D SMART NPCS --- */
 const shirtColors = [0x38bdf8, 0xef4444, 0x10b981, 0xf59e0b, 0xa855f7];
 
 function createBlockyNPCMesh(shirtColor) {
@@ -453,7 +463,7 @@ for (let i = 0; i < 45; i++) {
 aliveCivilians = npcs.length;
 updateHUD();
 
-/* --- 9. EXPLOSION & DESTRUCTION PIPELINE --- */
+/* --- 10. EXPLOSION & STRUCTURAL DESTRUCTION --- */
 function triggerExplosion(x, y, z, radius = 14, damage = 100) {
     playExplosionSound(radius > 16 ? 1.6 : 1.1);
 
@@ -465,7 +475,7 @@ function triggerExplosion(x, y, z, radius = 14, damage = 100) {
     scene.add(blastMesh);
     particles.push({ mesh: blastMesh, scaleSpeed: 26, fadeSpeed: 3.2, maxScale: radius * 1.5 });
 
-    // Apply destruction and structural leaning physics to buildings
+    // Granular piece-by-piece destructibility & leaning torque
     if (typeof BuildingsModule !== 'undefined') {
         BuildingsModule.damageBuildingAt(x, y, z, radius, damage, physicsBlocks, (collapsedBuilding) => {
             collateralDamageMillions += Math.floor(collapsedBuilding.totalHeight * 2.5);
@@ -567,7 +577,7 @@ function updateHUD() {
     if (clEl) clEl.innerText = `$${collateralDamageMillions}M`;
 }
 
-/* --- 10. WEAPON LAUNCHERS & FIRING PIPELINE --- */
+/* --- 11. COMMANDER WEAPON STRIKES --- */
 function launchCommanderStrike(targetPos) {
     initAudio();
 
@@ -676,7 +686,7 @@ function createClusterDispenserModule() {
     return group;
 }
 
-/* --- 11. RAYCASTING & INPUT DISPATCH --- */
+/* --- 12. RAYCASTING & INPUT DISPATCH --- */
 const raycaster = new THREE.Raycaster();
 const mousePos = new THREE.Vector2();
 let targetAimPoint = new THREE.Vector3(0, 0, 0);
@@ -715,10 +725,9 @@ window.addEventListener('click', (e) => {
         if (typeof WeaponsModule !== 'undefined') {
             WeaponsModule.fire(player, camera, scene, audioCtx, {
                 getShootables: () => [ground, ...cars.map(c => c.group), ...npcs.map(n => n.group), ...scene.children],
-                onBulletHit: (hitPos, hitObj) => {
-                    // Check if bullet struck building support or NPC
+                onBulletHit: (hitPos) => {
                     if (typeof BuildingsModule !== 'undefined') {
-                        BuildingsModule.damageBuildingAt(hitPos.x, hitPos.y, hitPos.z, 2.5, 35, physicsBlocks, (collapsed) => {
+                        BuildingsModule.damageBuildingAt(hitPos.x, hitPos.y, hitPos.z, 2.2, 35, physicsBlocks, (collapsed) => {
                             collateralDamageMillions += Math.floor(collapsed.totalHeight * 2.5);
                             updateHUD();
                         });
@@ -732,7 +741,7 @@ window.addEventListener('click', (e) => {
     }
 });
 
-/* --- 12. DYNAMIC HUD & WEAPON TOGGLE --- */
+/* --- 13. DYNAMIC HUD & WEAPON SLOTS --- */
 const keys = {};
 window.addEventListener('keydown', (e) => {
     if (inCutscene) return;
@@ -806,7 +815,7 @@ function toggleCameraMode() {
 const camBtn = document.getElementById('btn-toggle-cam');
 if (camBtn) camBtn.addEventListener('click', toggleCameraMode);
 
-/* --- 13. MOBILE TOUCH CONTROLS --- */
+/* --- 14. MOBILE TOUCH CONTROLS --- */
 const joystick = { active: false, startX: 0, startY: 0, moveX: 0, moveY: 0 };
 const joystickZone = document.getElementById('joystick-container');
 const joystickKnob = document.getElementById('joystick-knob');
@@ -899,7 +908,7 @@ if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
                         getShootables: () => [ground, ...cars.map(c => c.group), ...npcs.map(n => n.group), ...scene.children],
                         onBulletHit: (hitPos) => {
                             if (typeof BuildingsModule !== 'undefined') {
-                                BuildingsModule.damageBuildingAt(hitPos.x, hitPos.y, hitPos.z, 2.5, 35, physicsBlocks, (collapsed) => {
+                                BuildingsModule.damageBuildingAt(hitPos.x, hitPos.y, hitPos.z, 2.2, 35, physicsBlocks, (collapsed) => {
                                     collateralDamageMillions += Math.floor(collapsed.totalHeight * 2.5);
                                     updateHUD();
                                 });
@@ -914,7 +923,7 @@ if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
     }
 }
 
-/* --- 14. MAIN SIMULATION & ANIMATION LOOP --- */
+/* --- 15. MAIN SIMULATION & ANIMATION LOOP --- */
 const clock = new THREE.Clock();
 
 function animate() {
@@ -1103,7 +1112,7 @@ function animate() {
         }
     });
 
-    // 9. Camera Navigation, FPV Interior Climbing & Movement
+    // 9. Camera Navigation & Smooth Stair Elevation
     if (!inCutscene) {
         if (isFPV) {
             if (keys['ArrowLeft']) player.yaw += 2.0 * delta;
@@ -1132,13 +1141,13 @@ function animate() {
             player.x += (forwardX * -moveZ + sideX * moveX) * player.speed * delta;
             player.z += (forwardZ * -moveZ + sideZ * moveX) * player.speed * delta;
 
-            // Check if player is inside a building or climbing stairs
+            // Check interior stairs elevation
             let targetY = 0;
             if (typeof BuildingsModule !== 'undefined') {
                 const interiorCheck = BuildingsModule.checkPlayerInterior(player.x, player.z, player.y);
                 targetY = interiorCheck.groundHeight;
             }
-            player.y = THREE.MathUtils.lerp(player.y, targetY, delta * 12);
+            player.y = THREE.MathUtils.lerp(player.y, targetY, delta * 14);
 
             camera.position.set(player.x, 1.8 + player.y, player.z);
             const lookTarget = new THREE.Vector3(
